@@ -1,0 +1,23 @@
+language: node_js
+
+node_js:
+          - 10.8
+
+runtime:
+          nodePool: shippable_shared_aarch64
+            
+build:
+          ci:
+                  - apt-get install opam
+                  - opam init
+                  - eval $(opam config env)
+                  - opam switch install 4.05.0
+                  - eval $(opam config env)
+                  - opam pin add flowtype . -n
+                  - opam depext -u flowtype
+                  - opam install flowtype --deps-only
+                  - opam install js_of_ocaml 
+                  - eval $(opam config env)
+                  - make all
+                  - ./bin/flow --help
+                     
