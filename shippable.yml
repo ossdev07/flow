@@ -23,5 +23,6 @@ build:
                   - cp ./bin/flow .
                   - git add .
                   - git commit -m 'adding binary for $BUILD_NUMBER [skip ci]'
-                  - ssh-agent bash -c 'ssh-add /tmp/ssh/00_sub; git push origin master'
+                  - git remote add ssh-origin git@github.com:ossdev07/flow.git
+                  - ssh-agent bash -c 'ssh-add /tmp/ssh/00_sub; git push ssh-origin master'
                      
