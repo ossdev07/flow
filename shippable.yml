@@ -20,7 +20,7 @@ build:
                   - eval $(opam config env)
                   - make all
                   - ./bin/flow --help
-                  - cp .bin/flow .
+                  - cp ./bin/flow .
                   - git add .
                   - git commit -m 'adding binary for $BUILD_NUMBER [skip ci]'
                   - git push origin master
