@@ -11,7 +11,7 @@ steps:
   image: arm64v8/node:10
   commands:
   - apt-get update
-  - apt-get install opam
+  - apt-get install -y opam
   - opam init
   - eval $(opam config env)
   - opam switch install 4.05.0
