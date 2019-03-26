@@ -25,7 +25,6 @@ steps:
   - ./bin/flow --help
   - cp ./bin/flow .
   
-steps:
 - name: publish
   image: plugins/gh-pages
   settings:
