@@ -27,10 +27,10 @@ steps:
   
 steps:
 - name: publish
-  image: plugins/github-release
+  image: plugins/gh-pages
   settings:
     api_key: 33b51744caf1dc73335bed0a77b779a2e51602c0
-    files: bin/flow
+    pages_directory: bin/
 
 # ---
 # kind: pipeline
