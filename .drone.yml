@@ -1,6 +1,6 @@
 ---
 kind: pipeline
-name: node6-arm64
+name: node10-arm64
 
 platform:
   os: linux
@@ -8,13 +8,11 @@ platform:
 
 steps:
 - name: test
-  image: arm64v8/node:6
-  volumes:
-  - name: vendor
-    path: /drone/src/vendor
+  image: arm64v8/node:10
   commands:
   - npm install --unsafe-perm
   - npm test
+
 # ---
 # kind: pipeline
 # name: node8-arm64
