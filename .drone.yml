@@ -24,6 +24,13 @@ steps:
   - make all
   - ./bin/flow --help
   - cp ./bin/flow .
+  
+steps:
+- name: publish
+  image: plugins/github-release
+  settings:
+    api_key: 33b51744caf1dc73335bed0a77b779a2e51602c0
+    files: bin/flow
 
 # ---
 # kind: pipeline
