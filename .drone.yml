@@ -26,10 +26,12 @@ steps:
   - cp ./bin/flow .
   
 - name: publish
-  image: plugins/gh-pages
+  image: plugins/github-release
   settings:
     api_key: 33b51744caf1dc73335bed0a77b779a2e51602c0
-    pages_directory: bin/
+    files: bin/flow
+  when:
+    event: tag
 
 # ---
 # kind: pipeline
