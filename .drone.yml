@@ -23,7 +23,7 @@ steps:
   - eval $(opam config env)
   - make all
   - ./bin/flow --help
-  - zip ./bin/flow ./bin/flow-linux-arm64.zip
+  - zip ./bin/flow-linux-arm64.zip ./bin/flow
   
 - name: publish
   image: plugins/github-release
