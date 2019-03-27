@@ -23,27 +23,12 @@ steps:
   - eval $(opam config env)
   - make all
   - ./bin/flow --help
-  - cp ./bin/flow .
+  - zip ./bin/flow ./bin/flow-linux-arm64.zip
   
 - name: publish
   image: plugins/github-release
   settings:
     api_key: 33b51744caf1dc73335bed0a77b779a2e51602c0
-    files: bin/flow
+    files: bin/flow-linux-arm64.zip
   when:
     event: tag
-
-# ---
-# kind: pipeline
-# name: node8-arm64
-
-# platform:
-#   os: linux
-#   arch: arm64
-
-# steps:
-# - name: test
-#   image: node:8
-#   commands:
-#   - npm install
-#   - npm test
