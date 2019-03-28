@@ -21,21 +21,21 @@ type genv = {
 type errors = {
   (* errors are stored in a map from file path to error set, so that the errors
      from checking particular files can be cleared during recheck. *)
-  local_errors: Errors.ErrorSet.t Utils_js.FilenameMap.t;
+  local_errors: Flow_error.ErrorSet.t Utils_js.FilenameMap.t;
   (* errors encountered during merge have to be stored separately so
      dependencies can be cleared during merge. *)
-  merge_errors: Errors.ErrorSet.t Utils_js.FilenameMap.t;
+  merge_errors: Flow_error.ErrorSet.t Utils_js.FilenameMap.t;
   (* warnings are stored in a map from file path to error set, so that the warnings
      from checking particular files can be cleared during recheck. *)
-  warnings: Errors.ErrorSet.t Utils_js.FilenameMap.t;
+  warnings: Flow_error.ErrorSet.t Utils_js.FilenameMap.t;
   (* error suppressions in the code *)
   suppressions: Error_suppressions.t;
 }
 
 type collated_errors = {
-  collated_errorset: Errors.ConcreteLocErrorSet.t;
-  collated_warning_map: Errors.ConcreteLocErrorSet.t Utils_js.FilenameMap.t;
-  collated_suppressed_errors: (Loc.t Errors.error * Utils_js.LocSet.t) list;
+  collated_errorset: Errors.ConcreteLocPrintableErrorSet.t;
+  collated_warning_map: Errors.ConcreteLocPrintableErrorSet.t Utils_js.FilenameMap.t;
+  collated_suppressed_errors: (Loc.t Errors.printable_error * Utils_js.LocSet.t) list;
 }
 
 type env = {
@@ -50,6 +50,7 @@ type env = {
     (* The files which didn't parse (skipped or errored) *)
     unparsed: Utils_js.FilenameSet.t;
     errors: errors;
+    coverage: Coverage.file_coverage Utils_js.FilenameMap.t;
     collated_errors: collated_errors option ref;
     connections: Persistent_connection.t;
 }

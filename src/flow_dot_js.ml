@@ -6,14 +6,18 @@
  *)
 
 let error_of_parse_error source_file (loc, err) =
-  let flow_err = Flow_error.EParseError (ALoc.of_loc loc, err) in
-  Flow_error.error_of_msg ~trace_reasons:[] ~source_file flow_err
+  Error_message.EParseError (ALoc.of_loc loc, err)
+  |> Flow_error.error_of_msg ~trace_reasons:[] ~source_file
+  |> Flow_error.concretize_error
+  |> Flow_error.make_error_printable
 
 let error_of_file_sig_error source_file e =
-  let flow_err = File_sig.With_Loc.(match e with
-  | IndeterminateModuleType loc -> Flow_error.EIndeterminateModuleType (ALoc.of_loc loc)
-  ) in
-  Flow_error.error_of_msg ~trace_reasons:[] ~source_file flow_err
+  File_sig.With_Loc.(match e with
+    | IndeterminateModuleType loc -> Error_message.EIndeterminateModuleType (ALoc.of_loc loc)
+  )
+  |> Flow_error.error_of_msg ~trace_reasons:[] ~source_file
+  |> Flow_error.concretize_error
+  |> Flow_error.make_error_printable
 
 let parse_content file content =
   let parse_options = Some Parser_env.({
@@ -36,12 +40,12 @@ let parse_content file content =
   in
   if parse_errors <> [] then
     let converted = List.fold_left (fun acc parse_error ->
-      Errors.ErrorSet.add (error_of_parse_error file parse_error) acc
-    ) Errors.ErrorSet.empty parse_errors in
+      Errors.ConcreteLocPrintableErrorSet.add (error_of_parse_error file parse_error) acc
+    ) Errors.ConcreteLocPrintableErrorSet.empty parse_errors in
     Error converted
   else
     match File_sig.With_Loc.program ~ast ~module_ref_prefix:None with
-    | Error e -> Error (Errors.ErrorSet.singleton (error_of_file_sig_error file e))
+    | Error e -> Error (Errors.ConcreteLocPrintableErrorSet.singleton (error_of_file_sig_error file e))
     | Ok fsig -> Ok (ast, fsig)
 
 let array_of_list f lst =
@@ -155,6 +159,7 @@ let stub_metadata ~root ~checked = { Context.
   suppress_comments = [];
   suppress_types = SSet.empty;
   default_lib_dir = None;
+  trust_mode = Options.NoTrust;
 }
 
 let get_master_cx =
@@ -210,13 +215,13 @@ let infer_and_merge ~root filename ast file_sig =
   let file_sigs = Utils_js.FilenameMap.singleton filename file_sig in
   let (_, _, comments) = ast in
   let aloc_ast = Ast_loc_utils.abstractify_mapper#program ast in
-  let cx, _other_cxs = Merge_js.merge_component_strict
+  let ((cx, tast, _), _other_cxs) = Merge_js.merge_component_strict
     ~metadata ~lint_severities ~file_options:None ~strict_mode ~file_sigs
     ~get_ast_unsafe:(fun _ -> (comments, aloc_ast))
     ~get_docblock_unsafe:(fun _ -> stub_docblock)
     (Nel.one filename) reqs [] (Context.sig_cx master_cx)
   in
-  cx
+  (cx, tast)
 
 let check_content ~filename ~content =
   let stdin_file = Some (Path.make_unsafe filename, content) in
@@ -232,16 +237,15 @@ let check_content ~filename ~content =
     let include_suppressions = Context.include_suppressions cx in
     let errors, warnings, suppressions =
       Error_suppressions.filter_lints ~include_suppressions suppressions errors severity_cover in
-    let errors = Errors.concretize_errorset errors in
-    let warnings = Errors.concretize_errorset warnings in
+    let errors = Flow_error.make_errors_printable errors in
+    let warnings = Flow_error.make_errors_printable warnings in
     let errors, _, suppressions = Error_suppressions.filter_suppressed_errors
-      suppressions errors ~unused:suppressions in
+      ~root ~file_options:None suppressions errors ~unused:suppressions in
     let warnings, _, _ = Error_suppressions.filter_suppressed_errors
-      suppressions warnings ~unused:suppressions
-    in errors, warnings
+      ~root ~file_options:None suppressions warnings ~unused:suppressions in
+    errors, warnings
   | Error parse_errors ->
-    let parse_errors = Errors.concretize_errorset parse_errors in
-    parse_errors, Errors.ConcreteLocErrorSet.empty
+    parse_errors, Errors.ConcreteLocPrintableErrorSet.empty
   in
   let strip_root = Some root in
   Errors.Json_output.json_of_errors_with_context
@@ -286,7 +290,7 @@ let infer_type filename content line col =
       let file = Context.file cx in
       let loc = mk_loc filename line col in Query_types.(
         let result = type_at_pos_type ~full_cx:cx ~file ~file_sig ~expand_aliases:false
-          ~type_table ~typed_ast loc in
+          ~omit_targ_defaults:false ~type_table ~typed_ast loc in
         match result with
         | FailureNoMatch -> Loc.none, Error "No match"
         | FailureUnparseable (loc, _, _) -> loc, Error "Unparseable"

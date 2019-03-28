@@ -19,11 +19,13 @@ type diff_algorithm = Trivial | Standard
 
 type node =
   | Raw of string
-  | Literal of Flow_ast.Literal.t
+  | Comment of Loc.t Flow_ast.Comment.t
+  | NumberLiteralNode of Flow_ast.NumberLiteral.t
+  | Literal of Loc.t Flow_ast.Literal.t
+  | StringLiteral of Flow_ast.StringLiteral.t
   | Statement of (Loc.t, Loc.t) Flow_ast.Statement.t
   | Program of (Loc.t, Loc.t) Flow_ast.program
   | Expression of (Loc.t, Loc.t) Flow_ast.Expression.t
-  | Identifier of Loc.t Flow_ast.Identifier.t
   | Pattern of (Loc.t, Loc.t) Flow_ast.Pattern.t
   | Params of (Loc.t, Loc.t) Flow_ast.Function.Params.t
   | Variance of (Loc.t) Flow_ast.Variance.t

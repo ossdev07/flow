@@ -131,8 +131,7 @@ let explicit_unchecked_require_strict cx (m, loc, cx_to) =
   let m_name = Reason.internal_module_name m in
   let from_t = Tvar.mk cx reason in
   Flow_js.lookup_builtin cx m_name reason
-    (Type.NonstrictReturning (Some (Type.DefT (reason, Type.bogus_trust (),
-       Type.AnyT Type.Untyped), from_t), None)) from_t;
+    (Type.NonstrictReturning (Some (Type.AnyT (reason, Type.Untyped), from_t), None)) from_t;
 
   (* flow the declared module type to importing context *)
   let to_t = Context.find_require cx_to loc in
@@ -140,7 +139,7 @@ let explicit_unchecked_require_strict cx (m, loc, cx_to) =
 
 let detect_sketchy_null_checks cx =
   let add_error ~loc ~null_loc kind falsy_loc =
-    Flow_error.ESketchyNullLint { kind; loc; null_loc; falsy_loc }
+    Error_message.ESketchyNullLint { kind; loc; null_loc; falsy_loc }
     |> Flow_js.add_output cx
   in
 
@@ -171,17 +170,17 @@ let detect_sketchy_null_checks cx =
 let detect_test_prop_misses cx =
   let misses = Context.test_prop_get_never_hit cx in
   Core_list.iter ~f:(fun (name, reasons, use_op) ->
-    Flow_js.add_output cx (Flow_error.EPropNotFound (name, reasons, use_op))
+    Flow_js.add_output cx (Error_message.EPropNotFound (name, reasons, use_op))
   ) misses
 
 let detect_unnecessary_optional_chains cx =
   Core_list.iter ~f:(fun (loc, lhs_reason) ->
-    Flow_js.add_output cx (Flow_error.EUnnecessaryOptionalChain (loc, lhs_reason))
+    Flow_js.add_output cx (Error_message.EUnnecessaryOptionalChain (loc, lhs_reason))
   ) (Context.unnecessary_optional_chains cx)
 
 let detect_unnecessary_invariants cx =
   Core_list.iter ~f:(fun (loc, reason) ->
-    Flow_js.add_output cx (Flow_error.EUnnecessaryInvariant (loc, reason))
+    Flow_js.add_output cx (Error_message.EUnnecessaryInvariant (loc, reason))
   ) (Context.unnecessary_invariants cx)
 
 let check_type_visitor wrap =
@@ -228,12 +227,13 @@ let detect_invalid_type_assert_calls ~full_cx file_sigs cxs =
     flag_shadowed_type_params = false;
     preserve_inferred_literal_types = false;
     optimize_types = true;
+    omit_targ_defaults = false;
   } in
   let check_valid_call ~genv ~targs_map call_loc (_, targ_loc) =
     Option.iter (Hashtbl.find_opt targs_map targ_loc) ~f:(fun scheme ->
       let desc = Reason.RCustom "TypeAssert library function" in
       let reason_main = Reason.mk_reason desc call_loc in
-      let wrap reason = Flow_js.add_output full_cx (Flow_error.EInvalidTypeArgs (
+      let wrap reason = Flow_js.add_output full_cx (Error_message.EInvalidTypeArgs (
         reason_main, Reason.mk_reason reason call_loc
       )) in
       match Ty_normalizer.from_scheme ~options ~genv scheme with
@@ -339,16 +339,14 @@ let apply_docblock_overrides (mtdt: Context.metadata) docblock_info =
    5. Link the local references to libraries in master_cx and component_cxs.
 *)
 let merge_component_strict ~metadata ~lint_severities ~file_options ~strict_mode ~file_sigs
-  ~get_ast_unsafe ~get_docblock_unsafe ?(do_gc=false)
+  ~get_ast_unsafe ~get_docblock_unsafe
   component reqs dep_cxs (master_cx: Context.sig_t) =
 
   let sig_cx = Context.make_sig () in
   let need_merge_master_cx = ref true in
 
-  let init_gc_state = if do_gc then Some (Gc_js.init ~master_cx) else None in
-
-  let rev_cxs, rev_tasts, impl_cxs, _ =
-    Nel.fold_left (fun (cxs, tasts, impl_cxs, gc_state) filename ->
+  let rev_cxs, rev_tasts, impl_cxs =
+    Nel.fold_left (fun (cxs, tasts, impl_cxs) filename ->
 
     (* create cx *)
     let info = get_docblock_unsafe filename in
@@ -379,14 +377,8 @@ let merge_component_strict ~metadata ~lint_severities ~file_options ~strict_mode
         ~lint_severities ~file_options ~file_sig
     in
 
-    let gc_state = Option.map gc_state Gc_js.(fun gc_state ->
-      let gc_state = mark cx gc_state in
-      sweep ~master_cx cx gc_state;
-      gc_state
-    ) in
-
-    cx::cxs, tast::tasts, FilenameMap.add filename cx impl_cxs, gc_state
-  ) ([], [], FilenameMap.empty, init_gc_state) component in
+    cx::cxs, tast::tasts, FilenameMap.add filename cx impl_cxs
+  ) ([], [], FilenameMap.empty) component in
   let cxs = Core_list.rev rev_cxs in
   let tasts = Core_list.rev rev_tasts in
 
@@ -438,6 +430,8 @@ let merge_component_strict ~metadata ~lint_severities ~file_options ~strict_mode
     ) locs
   );
 
+  let coverages = cx :: other_cxs |> Query_types.component_coverage ~full_cx:cx in
+
   (* Post-merge errors.
    *
    * At this point, all dependencies have been merged and the component has been
@@ -453,9 +447,9 @@ let merge_component_strict ~metadata ~lint_severities ~file_options ~strict_mode
 
   force_annotations cx other_cxs;
 
-  match Core_list.zip_exn cxs tasts with
+  match ListUtils.combine3 (cxs, tasts, coverages) with
   | [] -> failwith "there is at least one cx"
-  | x::xs -> x, xs
+  | x::xs -> (x, xs)
 
 let merge_tvar =
   let open Type in
@@ -496,7 +490,7 @@ let merge_tvar =
     in
     match lowers with
       | [t] -> t
-      | t0::t1::ts -> DefT (r, bogus_trust (), UnionT (UnionRep.make t0 t1 ts))
+      | t0::t1::ts -> UnionT (r, UnionRep.make t0 t1 ts)
       | [] ->
         let uses = Flow_js.possible_uses cx id in
         if uses = [] || existential
@@ -596,7 +590,7 @@ module ContextOptimizer = struct
        *)
       | Some file when not @@ is_builtin_or_flowlib cx file &&
           (export_file = Some file || export_file = Some File_key.Builtins) ->
-        Flow_error.EDynamicExport (r, reason_exp) |> Flow_js.add_output cx
+        Error_message.EDynamicExport (r, reason_exp) |> Flow_js.add_output cx
       | _ -> ()
 
     method reduce cx module_ref =
@@ -716,7 +710,7 @@ module ContextOptimizer = struct
         let id = opaque_id in
         SigHash.add_aloc sig_hash id;
         super#type_ cx pole t
-      | DefT (r, _, AnyT src) when
+      | AnyT (r, src) when
           Unsoundness.banned_in_exports src && Option.is_some export_reason ->
         self#warn_dynamic_exports cx r (Option.value_exn export_reason);
         let t' = super#type_ cx pole t in

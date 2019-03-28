@@ -299,23 +299,23 @@ let utf8_escape =
     |> Wtf8.fold_wtf_8 (f ~quote) (Buffer.create (String.length str))
     |> Buffer.contents
 
+let layout_from_comment anchor loc_node (loc_cm, comment) =
+  let open Ast.Comment in
+  let comment_text = match comment with
+    | Line txt -> Printf.sprintf "//%s\n" txt
+    | Block txt ->
+      match Loc.lines_intersect loc_node loc_cm, anchor with
+      | false, Preceding -> Printf.sprintf "\n/*%s*/" txt
+      | false, Following -> Printf.sprintf "/*%s*/\n" txt
+      | false, Enclosing -> Printf.sprintf "/*%s*/\n" txt
+      | _ -> Printf.sprintf "/*%s*/" txt
+  in
+  SourceLocation (loc_cm, Atom comment_text)
+
 let with_attached_comments: comment_map option ref = ref None
 
 let layout_node_with_comments current_loc layout_node =
   let open Layout in
-  let open Ast.Comment in
-  let layout_from_comment anchor (loc_st, _) (loc_cm, comment) =
-    let comment_text = match comment with
-      | Line txt -> Printf.sprintf "//%s\n" txt
-      | Block txt ->
-        match Loc.lines_intersect loc_st loc_cm, anchor with
-        | false, Preceding -> Printf.sprintf "\n/*%s*/" txt
-        | false, Following -> Printf.sprintf "/*%s*/\n" txt
-        | false, Enclosing -> Printf.sprintf "/*%s*/\n" txt
-        | _ -> Printf.sprintf "/*%s*/" txt
-    in
-    SourceLocation (loc_cm, Atom comment_text)
-  in
   match !with_attached_comments with
     | None -> layout_node
     | Some attached when LocMap.is_empty attached -> layout_node
@@ -325,23 +325,43 @@ let layout_node_with_comments current_loc layout_node =
         | Some comments ->
           with_attached_comments := Some (LocMap.remove current_loc attached);
           let matched = List.fold_left (fun nodes comment ->
-            let (anchor, statement_attached, comment) = comment in
+            let (anchor, (loc_st, _), comment) = comment in
             match anchor with
               | Preceding ->
-                nodes @ [layout_from_comment anchor statement_attached comment]
+                nodes @ [layout_from_comment anchor loc_st comment]
               | Following ->
-                [layout_from_comment anchor statement_attached comment] @ nodes
+                [layout_from_comment anchor loc_st comment] @ nodes
               | Enclosing ->
-                (* TODO(festevezga)(T29896911) print enclosing comments using statement_attached *)
-                [layout_from_comment anchor statement_attached comment] @ nodes
+                (* TODO(festevezga)(T29896911) print enclosing comments using full statement *)
+                [layout_from_comment anchor loc_st comment] @ nodes
           ) [layout_node] comments in
           Concat matched
 
-let source_location_with_comments (current_loc, layout_node) =
-  layout_node_with_comments current_loc (SourceLocation (current_loc, layout_node))
+let layout_node_with_simple_comments current_loc comments layout_node =
+  let { Ast.Syntax.leading; trailing; _} = comments in
+  let preceding = List.map (layout_from_comment Preceding current_loc) leading in
+  let following = List.map (layout_from_comment Following current_loc) trailing in
+  Concat (preceding @ [layout_node] @ following)
 
-let identifier_with_comments (current_loc, { Ast.Identifier.name; comments= _ }) =
-  layout_node_with_comments current_loc (Identifier (current_loc, name))
+let layout_node_with_simple_comments_opt current_loc comments layout_node =
+  match comments with
+  | Some c -> layout_node_with_simple_comments current_loc c layout_node
+  | None -> layout_node
+
+let source_location_with_comments ?comments (current_loc, layout_node) =
+  match comments with
+  | Some comments ->
+    layout_node_with_simple_comments current_loc comments (SourceLocation (current_loc, layout_node))
+  | None ->
+    layout_node_with_comments current_loc (SourceLocation (current_loc, layout_node))
+
+let identifier_with_comments (current_loc, { Ast.Identifier.name; comments }) =
+  let node = Identifier (current_loc, name) in
+  match comments with
+  | Some comments ->
+    layout_node_with_simple_comments current_loc comments node
+  | None ->
+    node
 
 (* Generate JS layouts *)
 let rec program ~preserve_docblock ~checksum (loc, statements, comments) =
@@ -387,8 +407,8 @@ and comment (loc, comment) =
   let module C = Ast.Comment in
   source_location_with_comments (loc, match comment with
   | C.Block txt -> fuse [
-      Atom "/*"; pretty_hardline;
-      Atom txt; pretty_hardline;
+      Atom "/*";
+      Atom txt;
       Atom "*/";
     ]
   | C.Line txt -> fuse [
@@ -694,8 +714,8 @@ and expression ?(ctxt=normal_context) (root_expr: (Loc.t, Loc.t) Ast.Expression.
           ~trailing_sep
           (List.rev rev_elements);
       ]
-    | E.Object { E.Object.properties } ->
-      group [
+    | E.Object { E.Object.properties; comments } ->
+      layout_node_with_simple_comments_opt loc comments @@ group [
         new_list
           ~wrap:(Atom "{", Atom "}")
           ~sep:(Atom ",")
@@ -960,21 +980,22 @@ and expression_or_spread ?(ctxt=normal_context) expr_or_spread =
 
 and identifier (loc, name) = identifier_with_comments (loc, name)
 
+and number_literal_type { Ast.NumberLiteral.raw; _ } =
+    Atom raw
+
 and number_literal ~in_member_object raw num =
   let str = Dtoa.shortest_string_of_float num in
-  let if_pretty, if_ugly =
-    if in_member_object then
-      (* `1.foo` is a syntax error, but `1.0.foo`, `1e0.foo` and even `1..foo` are all ok. *)
-      let is_int x = not (String.contains x '.' || String.contains x 'e') in
-      let if_pretty = if is_int raw then wrap_in_parens (Atom raw) else Atom raw in
-      let if_ugly = if is_int str then fuse [Atom str; Atom "."] else Atom str in
-      if_pretty, if_ugly
-    else
-      Atom raw, Atom str
-  in
-  if if_pretty = if_ugly then if_pretty else IfPretty (if_pretty, if_ugly)
+  if in_member_object then begin
+    (* `1.foo` is a syntax error, but `1.0.foo`, `1e0.foo` and even `1..foo` are all ok. *)
+    let is_int x = not (String.contains x '.' || String.contains x 'e') in
+    let if_pretty = if is_int raw then wrap_in_parens (Atom raw) else Atom raw in
+    let if_ugly = if is_int str then fuse [Atom str; Atom "."] else Atom str in
+    if if_pretty = if_ugly then if_pretty else IfPretty (if_pretty, if_ugly)
+  end else begin
+    if String.equal raw str then Atom raw else IfPretty (Atom raw, Atom str)
+  end
 
-and literal { Ast.Literal.raw; value; } =
+and literal { Ast.Literal.raw; value; comments= _ (* handled by caller *) } =
   let open Ast.Literal in
   match value with
   | Number num ->
@@ -986,6 +1007,8 @@ and literal { Ast.Literal.raw; value; } =
     let flags = flags |> String_utils.to_list |> List.sort Char.compare |> String_utils.of_list in
     fuse [Atom "/"; Atom pattern; Atom "/"; Atom flags]
   | _ -> Atom raw
+
+and string_literal_type { Ast.StringLiteral.raw; _ } = Atom raw
 
 and member ?(optional=false) ~precedence ~ctxt member_node =
   let { Ast.Expression.Member._object; property } = member_node in
@@ -1003,10 +1026,10 @@ and member ?(optional=false) ~precedence ~ctxt member_node =
   fuse [
     begin match _object with
     | (_, Ast.Expression.Call _) -> expression ~ctxt _object
-    | (_, Ast.Expression.Literal { Ast.Literal.value = Ast.Literal.Number num; raw })
+    | (loc, Ast.Expression.Literal { Ast.Literal.value = Ast.Literal.Number num; raw; comments })
       when not computed ->
       (* 1.foo would be confused with a decimal point, so it needs parens *)
-      number_literal ~in_member_object:true raw num
+      source_location_with_comments ?comments (loc, number_literal ~in_member_object:true raw num)
     | _ -> expression_with_parens ~precedence ~ctxt _object
     end;
     ldelim;
@@ -1521,7 +1544,7 @@ and object_properties_with_newlines properties =
         begin match v with
         | (_, E.Function _)
         | (_, E.ArrowFunction _) -> true
-        | (_, E.Object { O.properties }) ->
+        | (_, E.Object { O.properties; comments= _ }) ->
           List.exists has_function_decl properties
         | _ -> false
         end
@@ -2346,8 +2369,8 @@ and type_ ((loc, t): (Loc.t, Loc.t) Ast.Type.t) =
     | T.Typeof t -> fuse [Atom "typeof"; space; type_ t]
     | T.Tuple ts ->
       group [new_list ~wrap:(Atom "[", Atom "]") ~sep:(Atom ",") (Core_list.map ~f:type_ ts)]
-    | T.StringLiteral { Ast.StringLiteral.raw; _ }
-    | T.NumberLiteral { Ast.NumberLiteral.raw; _ } -> Atom raw
+    | T.StringLiteral lit -> string_literal_type lit
+    | T.NumberLiteral t -> number_literal_type t
     | T.BooleanLiteral value -> Atom (if value then "true" else "false")
     | T.Exists -> Atom "*"
   )

@@ -7,7 +7,7 @@
 
 open Utils_js
 
-type 'a merge_job_result = ('a, Flow_error.error_message) result
+type 'a merge_job_result = ('a, Error_message.t) result
 type 'a merge_job_results = (File_key.t * 'a merge_job_result) list
 type 'a merge_job =
   worker_mutator: Context_heaps.Merge_context_mutator.worker_mutator ->
@@ -24,6 +24,7 @@ type merge_strict_context_result = {
   master_cx: Context.sig_t;
   file_sigs: File_sig.With_ALoc.t FilenameMap.t;
   typed_asts: (ALoc.t, ALoc.t * Type.t) Flow_ast.program FilenameMap.t;
+  coverage_map: Coverage.file_coverage FilenameMap.t;
 }
 
 val merge_strict_context:
@@ -45,7 +46,8 @@ val check_file:
   Options.t ->
   reader:Module_heaps.Mutator_reader.reader ->
   File_key.t ->
-  (Errors.ErrorSet.t * Errors.ErrorSet.t * Error_suppressions.t)
+  (Flow_error.ErrorSet.t * Flow_error.ErrorSet.t * Error_suppressions.t
+    * Coverage.file_coverage FilenameMap.t)
 
 val merge_runner:
   job: 'a merge_job ->
@@ -65,11 +67,12 @@ val merge_strict:
   worker_mutator: Context_heaps.Merge_context_mutator.worker_mutator ->
   reader: Mutator_state_reader.t ->
   intermediate_result_callback:
-    ((Errors.ErrorSet.t * Errors.ErrorSet.t *
-      Error_suppressions.t) merge_job_results Lazy.t -> unit) ->
+    ((Flow_error.ErrorSet.t * Flow_error.ErrorSet.t *
+      Error_suppressions.t * Coverage.file_coverage FilenameMap.t) merge_job_results Lazy.t -> unit) ->
   options: Options.t ->
   workers: MultiWorkerLwt.worker list option ->
   FilenameSet.t FilenameMap.t ->
   (File_key.t Nel.t) FilenameMap.t ->
   bool FilenameMap.t ->
-  (Errors.ErrorSet.t * Errors.ErrorSet.t  * Error_suppressions.t) merge_results Lwt.t
+  (Flow_error.ErrorSet.t * Flow_error.ErrorSet.t  * Error_suppressions.t
+    * Coverage.file_coverage FilenameMap.t) merge_results Lwt.t

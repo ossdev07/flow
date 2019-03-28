@@ -15,7 +15,7 @@ module Action = struct
   type t =
   | Flow of Type.t * Type.use_t
   | Unify of Type.use_op * Type.t * Type.t
-  | Error of Flow_error.error_message
+  | Error of Error_message.t
 
   (* Extract tvars involved in an action. *)
   let tvars =
@@ -25,8 +25,8 @@ module Action = struct
     | _ -> acc
     in
     function
-    | Flow ((DefT (_, _, AnyT _) | DefT (_, _, EmptyT)), _)
-    | Flow (_, UseT (_, (DefT (_, _, AnyT _) | DefT (_, _, MixedT _))))
+    | Flow ((AnyT _ | DefT (_, _, EmptyT)), _)
+    | Flow (_, UseT (_, (AnyT _ | DefT (_, _, MixedT _))))
       -> IMap.empty
     | Flow (t1, UseT (_, t2)) -> f t1 (f t2 IMap.empty)
     | Flow (t1, _) -> f t1 IMap.empty
@@ -143,7 +143,7 @@ type branch = {
 (* The state maintained by speculative_matches when trying each case of a
    union/intersection in turn. *)
 type match_state =
-| NoMatch of Flow_error.error_message list
+| NoMatch of Error_message.t list
 | ConditionalMatch of Case.t
 
 module State : sig

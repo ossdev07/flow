@@ -166,23 +166,17 @@ module Friendly = struct
     | _ -> message_inlines_of_string (string_of_desc desc)
     in
     if loc then (
-      let loc = match annot_aloc_of_reason r with
+      let loc = match annot_loc_of_reason r with
       | Some loc -> loc
-      | None -> def_aloc_of_reason r
+      | None -> def_loc_of_reason r
       in
-      if (ALoc.to_loc loc) = Loc.none then
+      if loc = Loc.none then
         Inline desc
       else
         Reference (desc, loc)
     ) else (
       Inline desc
     )
-
-  (* Intersperses a given separator in between each element of a list. *)
-  let rec intersperse sep = function
-  | [] -> []
-  | x :: [] -> x :: []
-  | x1 :: x2 :: xs -> x1 :: sep :: intersperse sep (x2 :: xs)
 
   (* Concatenates a list of messages with a conjunction according to the "rules"
    * of the English language. *)
@@ -270,7 +264,7 @@ module Friendly = struct
   let message_group_of_error =
     let message_of_frames frames acc_frames =
       let frames = Core_list.concat (List.rev (frames :: acc_frames)) in
-      Core_list.concat (intersperse [text " of "] (List.rev frames))
+      Core_list.concat (Core_list.intersperse (List.rev frames) [text " of "])
     in
     let rec flatten_speculation_branches
       ~show_all_branches
@@ -551,7 +545,7 @@ module Friendly = struct
     in
     fun message_group ->
       let acc = loop [] message_group in
-      Core_list.concat (intersperse [text " "] (List.rev acc))
+      Core_list.concat (Core_list.intersperse (List.rev acc) [text " "])
 
   (* Converts our friendly error to a classic error message. *)
   let to_classic error =
@@ -585,78 +579,7 @@ module Friendly = struct
     }
 end
 
-type 'loc error = error_kind * 'loc message list * 'loc Friendly.t'
-
-class virtual ['a, 'b] mapper' = object(this)
-  method virtual loc: 'a -> 'b
-
-  method error (error: 'a error) : 'b error =
-    let (error_kind, messages, friendly_error) = error in
-    let error_kind' = this#error_kind error_kind in
-    let messages' = Core_list.map ~f:this#message messages in
-    let friendly_error' = this#friendly_error friendly_error in
-    (error_kind', messages', friendly_error')
-
-  method error_kind (error_kind: error_kind) = error_kind
-
-  method private message (message: 'a message) : 'b message =
-    match message with
-    | BlameM (loc, str) ->
-      let loc' = this#loc loc in
-      BlameM (loc', str)
-    | CommentM str -> CommentM str
-
-  method friendly_error (friendly_error: 'a Friendly.t') : 'b Friendly.t' =
-    let { Friendly.loc; root; message; } = friendly_error in
-    let loc' = this#loc loc in
-    let root' = Option.map ~f:this#error_root root in
-    let message' = this#error_message message in
-    { Friendly.loc = loc'; root = root'; message = message'; }
-
-  method private error_root (error_root: 'a Friendly.error_root) : 'b Friendly.error_root =
-    let { Friendly.root_loc; root_message; } = error_root in
-    let root_loc' = this#loc root_loc in
-    let root_message' = this#friendly_message root_message in
-    { Friendly.root_loc = root_loc'; root_message = root_message'; }
-
-  method private error_message (error_message: 'a Friendly.error_message) : 'b Friendly.error_message =
-    match error_message with
-    | Friendly.Normal { message; frames; } ->
-      let message' = this#friendly_message message in
-      let frames' = Option.map ~f:(Core_list.map ~f:this#friendly_message) frames in
-      Friendly.Normal { message = message'; frames = frames' }
-    | Friendly.Speculation { frames; branches; } ->
-      let frames' = Core_list.map ~f:this#friendly_message frames in
-      let branches' = Core_list.map ~f:(fun branch ->
-        let (score, friendly_error) = branch in
-        let friendly_error' = this#friendly_error friendly_error in
-        (score, friendly_error')
-      ) branches in
-      Friendly.Speculation { frames = frames'; branches = branches'; }
-
-  method friendly_message (friendly_message: 'a Friendly.message) : 'b Friendly.message =
-    Core_list.map ~f:this#message_feature friendly_message
-
-  method message_feature (message_feature: 'a Friendly.message_feature) : 'b Friendly.message_feature =
-    match message_feature with
-    | Friendly.Inline inlines ->
-      let inlines' = Core_list.map ~f:this#message_inline inlines in
-      Friendly.Inline inlines'
-    | Friendly.Reference (inlines, loc) ->
-      let inlines' = Core_list.map ~f:this#message_inline inlines in
-      let loc' = this#loc loc in
-      Friendly.Reference (inlines', loc')
-
-  method message_inline (message_inline: Friendly.message_inline) = message_inline
-
-end
-
-let loc_concretizer = object
-  inherit [ALoc.t, Loc.t] mapper'
-  method loc = ALoc.to_loc
-end
-
-let is_duplicate_provider_error (kind, _, _) = kind = DuplicateProviderError
+type 'loc printable_error = error_kind * 'loc message list * 'loc Friendly.t'
 
 let info_to_messages = function
 | loc, [] -> [BlameM (loc, "")]
@@ -664,8 +587,7 @@ let info_to_messages = function
   BlameM (loc, msg) ::
   (msgs |> Core_list.map ~f:(fun msg -> CommentM msg))
 
-let infos_to_messages infos =
-  Core_list.concat (Core_list.map ~f:info_to_messages infos)
+let infos_to_messages infos = Core_list.(infos >>= info_to_messages)
 
 let mk_error
   ?(kind=InferError)
@@ -674,7 +596,7 @@ let mk_error
   ?(frames: 'loc Friendly.message list option)
   (loc: 'loc)
   (message: 'loc Friendly.message)
-  : 'loc error
+  : 'loc printable_error
 =
   let open Friendly in
   let trace = Option.value_map trace_infos ~default:[] ~f:infos_to_messages in
@@ -700,7 +622,7 @@ let mk_speculation_error
   let trace = Option.value_map trace_infos ~default:[] ~f:infos_to_messages in
   let branches = Core_list.map ~f:(fun (score, (_, _, error)) ->
     (score, error)
-  ) speculation_errors in
+  ) speculation_errors |> ListUtils.dedup in
   (kind, trace, {
     loc;
     root = Option.map root (fun (root_loc, root_message) -> { root_loc; root_message });
@@ -857,16 +779,16 @@ let file_of_source source =
     | Some File_key.Builtins -> None
     | None -> None
 
-let loc_of_error ((_, _, { Friendly.loc; _ }): 'loc error) =
+let loc_of_printable_error ((_, _, { Friendly.loc; _ }): 'loc printable_error) =
   loc
 
-let loc_of_error_for_compare ((_, _, err): 'a error) =
+let loc_of_printable_error_for_compare ((_, _, err): 'a printable_error) =
   let open Friendly in
   match err with
   | { root=Some {root_loc; _}; _ } -> root_loc
   | { loc; _ } -> loc
 
-let locs_of_error =
+let locs_of_printable_error =
   let locs_of_message locs message = Friendly.(
     List.fold_left (fun locs feature ->
       match feature with
@@ -898,10 +820,10 @@ let locs_of_error =
     locs
   ) in
 
-  fun ((_, _, error): 'loc error) ->
+  fun ((_, _, error): 'loc printable_error) ->
     locs_of_friendly_error [] error
 
-let kind_of_error (kind, _, _) = kind
+let kind_of_printable_error (kind, _, _) = kind
 
 (* TODO: deprecate this in favor of Reason.json_of_loc *)
 let deprecated_json_props_of_loc ~strip_root loc = Loc.(
@@ -991,7 +913,7 @@ let rec compare compare_loc =
   in
   fun err1 err2 ->
     let open Friendly in
-    let loc1, loc2 = loc_of_error_for_compare err1, loc_of_error_for_compare err2 in
+    let loc1, loc2 = loc_of_printable_error_for_compare err1, loc_of_printable_error_for_compare err2 in
     let (k1, _, err1), (k2, _, err2) = err1, err2 in
     let k = compare_loc loc1 loc2 in
     if k = 0 then
@@ -1013,26 +935,10 @@ let rec compare compare_loc =
       else k
     else k
 
-module Error = struct
-  type t = ALoc.t error
-  let compare = compare ALoc.compare
-end
-
-(* we store errors in sets, currently, because distinct
-   traces may share endpoints, and produce the same error *)
-module ErrorSet = Set.Make(Error)
-
-module ConcreteLocErrorSet = Set.Make (struct
-  type t = Loc.t error
+module ConcreteLocPrintableErrorSet = Set.Make (struct
+  type t = Loc.t printable_error
   let compare = compare Loc.compare
 end)
-
-let concretize_errorset errors =
-  ErrorSet.fold begin fun err acc ->
-    ConcreteLocErrorSet.add (loc_concretizer#error err) acc
-  end errors ConcreteLocErrorSet.empty
-
-let concretize_error = loc_concretizer#error
 
 type 'a error_group =
   (* Friendly errors without a root are never grouped. When traces are enabled
@@ -1047,28 +953,28 @@ type 'a error_group =
       omitted: int;
     }
 
-exception Interrupt_ErrorSet_fold of Loc.t error_group list
+exception Interrupt_PrintableErrorSet_fold of Loc.t error_group list
 
-(* Folds an ErrorSet into a grouped list. However, the group and all sub-groups
+(* Folds an PrintableErrorSet into a grouped list. However, the group and all sub-groups
  * are in reverse order. *)
 let collect_errors_into_groups max set =
   let open Friendly in
   try
-    let (_, acc) = ConcreteLocErrorSet.fold (fun (kind, trace, error) (n, acc) ->
+    let (_, acc) = ConcreteLocPrintableErrorSet.fold (fun (kind, trace, error) (n, acc) ->
       let omit = Option.value_map max ~default:false ~f:(fun max -> max <= n) in
       let acc = match error with
       | error when trace <> [] ->
-        if omit then raise (Interrupt_ErrorSet_fold acc);
+        if omit then raise (Interrupt_PrintableErrorSet_fold acc);
         Singleton (kind, trace, error) :: acc
       | ({ root = None; _ } as error) ->
-        if omit then raise (Interrupt_ErrorSet_fold acc);
+        if omit then raise (Interrupt_PrintableErrorSet_fold acc);
         Singleton (kind, trace, error) :: acc
       (* Friendly errors with a root might need to be grouped. *)
       | ({ root = Some root; _ } as error) ->
         (match acc with
         (* When the root location and message match the previous group, add our
          * friendly error to the group. We can do this by only looking at the last
-         * group because ErrorSet is sorted so that friendly errors with the same
+         * group because PrintableErrorSet is sorted so that friendly errors with the same
          * root loc/message are stored next to each other.
          *
          * If we are now omitting errors then increment the omitted count
@@ -1086,7 +992,7 @@ let collect_errors_into_groups max set =
           } :: acc'
         (* If the roots did not match then we have a friendly singleton. *)
         | _ ->
-          if omit then raise (Interrupt_ErrorSet_fold acc);
+          if omit then raise (Interrupt_PrintableErrorSet_fold acc);
           Group {
             kind = kind;
             root = root;
@@ -1099,7 +1005,7 @@ let collect_errors_into_groups max set =
     ) set (0, []) in
     acc
   with
-    Interrupt_ErrorSet_fold acc ->
+    Interrupt_PrintableErrorSet_fold acc ->
       acc
 
 (* Human readable output *)
@@ -2684,8 +2590,8 @@ module Cli_output = struct
       ~strip_root ~errors ~warnings ~lazy_msg () ->
       let truncate = not (flags.show_all_errors) in
       let max_count = if truncate then Some 50 else None in
-      let err_count = ConcreteLocErrorSet.cardinal errors in
-      let warn_count = ConcreteLocErrorSet.cardinal warnings in
+      let err_count = ConcreteLocPrintableErrorSet.cardinal errors in
+      let warn_count = ConcreteLocPrintableErrorSet.cardinal warnings in
       let errors = collect_errors_into_groups max_count errors in
       let warnings =
         collect_errors_into_groups
@@ -2996,9 +2902,9 @@ module Json_output = struct
     let f = json_of_error_with_context ~strip_root ~stdin_file ~version in
     let obj_props_rev =
       []
-      |> ConcreteLocErrorSet.fold (fun error acc ->
+      |> ConcreteLocPrintableErrorSet.fold (fun error acc ->
         f ~severity:Err (error, Utils_js.LocSet.empty) :: acc) errors
-      |> ConcreteLocErrorSet.fold (fun warn acc ->
+      |> ConcreteLocPrintableErrorSet.fold (fun warn acc ->
         f ~severity:Warn (warn, Utils_js.LocSet.empty) :: acc) warnings
     in
     (* We want these to show up as "suppressed error"s, not "suppressed off"s *)
@@ -3028,7 +2934,7 @@ module Json_output = struct
       "jsonVersion", JSON_String (match version with JsonV1 -> "1" | JsonV2 -> "2");
       "errors", json_of_errors_with_context
         ~strip_root ~stdin_file ~suppressed_errors ~version ~errors ~warnings ();
-      "passed", JSON_Bool (ConcreteLocErrorSet.is_empty errors);
+      "passed", JSON_Bool (ConcreteLocPrintableErrorSet.is_empty errors);
     ]
     in fun profiling ->
       let props = match profiling with
@@ -3106,14 +3012,14 @@ module Vim_emacs_output = struct
       );
       Buffer.contents buf
     in
-    let to_string ~strip_root prefix ((_, trace, error) : Loc.t error) : string =
+    let to_string ~strip_root prefix ((_, trace, error) : Loc.t printable_error) : string =
       classic_to_string ~strip_root prefix trace (Friendly.to_classic error) in
     fun ~strip_root oc ~errors ~warnings () ->
       let sl = []
-        |> ConcreteLocErrorSet.fold (fun err acc ->
+        |> ConcreteLocPrintableErrorSet.fold (fun err acc ->
             (to_string ~strip_root "Error: " err)::acc
           ) (errors)
-        |> ConcreteLocErrorSet.fold (fun warn acc ->
+        |> ConcreteLocPrintableErrorSet.fold (fun warn acc ->
             (to_string ~strip_root "Warning: " warn)::acc
           ) (warnings)
         |> List.sort String.compare
@@ -3135,7 +3041,7 @@ module Lsp_output = struct
     relatedLocations: (Loc.t * string) list;
   }
 
-  let lsp_of_error (error: Loc.t error) : t =
+  let lsp_of_error (error: Loc.t printable_error) : t =
     (* e.g. "Error about `code` in type Ref(`foo`)"                    *)
     (* will produce LSP message "Error about `code` in type `foo` [1]" *)
     (* and the LSP related location will have message "[1]: `foo`"      *)
@@ -3165,9 +3071,4 @@ module Lsp_output = struct
       code = string_of_kind kind;
       relatedLocations = List.rev relatedLocations;
     }
-end
-
-class mapper = object
-  inherit [ALoc.t, ALoc.t] mapper'
-  method loc x = x
 end

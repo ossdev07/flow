@@ -51,17 +51,20 @@ module Object
 
   let key ?(class_body=false) env =
     let open Ast.Expression.Object.Property in
-    match Peek.token env with
+    let leading = Peek.comments env in
+    let tkn = Peek.token env in
+    let trailing = Peek.comments env in
+    match tkn with
     | T_STRING (loc, value, raw, octal) ->
         if octal then strict_error env Error.StrictOctalLiteral;
         Expect.token env (T_STRING (loc, value, raw, octal));
         let value = Literal.String value in
-        loc, Literal (loc, { Literal.value; raw; })
+        loc, Literal (loc, { Literal.value; raw; comments= (Flow_ast_utils.mk_comments_opt ~leading ~trailing ()); })
     | T_NUMBER { kind; raw } ->
         let loc = Peek.loc env in
         let value = Expression.number env kind raw in
         let value = Literal.Number value in
-        loc,  Literal (loc, { Literal.value; raw; })
+        loc,  Literal (loc, { Literal.value; raw; comments= (Flow_ast_utils.mk_comments_opt ~leading ~trailing ()); })
     | T_LBRACKET ->
         with_loc (fun env ->
           Expect.token env T_LBRACKET;
@@ -346,11 +349,15 @@ module Object
 
     in fun env ->
       let loc, (expr, errs) = with_loc (fun env ->
+        let leading = Peek.comments env in
         Expect.token env T_LCURLY;
         let props, errs =
           properties env ~rest_trailing_comma:None ([], Pattern_cover.empty_errors) in
         Expect.token env T_RCURLY;
-        { Ast.Expression.Object.properties = props; }, errs
+        let trailing = Peek.comments env in
+        { Ast.Expression.Object.properties = props;
+          comments = Flow_ast_utils.mk_comments_opt ~leading ~trailing ();
+        }, errs
       ) env in
       loc, expr, errs
 

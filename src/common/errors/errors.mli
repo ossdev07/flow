@@ -43,48 +43,38 @@ module Friendly : sig
   val message_of_string: string -> 'a message
   val text: string -> 'a message_feature
   val code: string -> 'a message_feature
-  val ref: ?loc:bool -> Reason.reason -> ALoc.t message_feature
-  val intersperse: 'a -> 'a list -> 'a list
+  val ref: ?loc:bool -> Reason.concrete_reason -> Loc.t message_feature
   val conjunction_concat: ?conjunction:string -> 'a message list -> 'a message
   val capitalize: 'a message -> 'a message
 end
 
 (* error structure *)
 
-type 'loc error
+type 'loc printable_error
 
 val mk_error:
   ?kind:error_kind ->
-  ?trace_infos: 'loc info list ->
-  ?root:('loc * 'loc Friendly.message) ->
-  ?frames:('loc Friendly.message list) ->
-  'loc ->
-  'loc Friendly.message ->
-  'loc error
+  ?trace_infos: Loc.t info list ->
+  ?root:(Loc.t * Loc.t Friendly.message) ->
+  ?frames:(Loc.t Friendly.message list) ->
+  Loc.t ->
+  Loc.t Friendly.message ->
+  Loc.t printable_error
 
 val mk_speculation_error:
   ?kind:error_kind ->
-  ?trace_infos:ALoc.t info list ->
-  loc:ALoc.t ->
-  root:(ALoc.t * ALoc.t Friendly.message) option ->
-  frames:(ALoc.t Friendly.message list) ->
-  speculation_errors:((int * ALoc.t error) list) ->
-  ALoc.t error
+  ?trace_infos:Loc.t info list ->
+  loc:Loc.t ->
+  root:(Loc.t * Loc.t Friendly.message) option ->
+  frames:(Loc.t Friendly.message list) ->
+  speculation_errors:((int * Loc.t printable_error) list) ->
+  Loc.t printable_error
 
-val is_duplicate_provider_error: ALoc.t error -> bool
+val loc_of_printable_error: 'loc printable_error -> 'loc
+val locs_of_printable_error: 'loc printable_error -> 'loc list
+val kind_of_printable_error: 'loc printable_error -> error_kind
 
-val loc_of_error: 'loc error -> 'loc
-val locs_of_error: 'loc error -> 'loc list
-val kind_of_error: 'loc error -> error_kind
-
-(* we store errors in sets, currently, because distinct
-   traces may share endpoints, and produce the same error *)
-module ErrorSet : Set.S with type elt = ALoc.t error
-
-module ConcreteLocErrorSet : Set.S with type elt = Loc.t error
-
-val concretize_errorset: ErrorSet.t -> ConcreteLocErrorSet.t
-val concretize_error: ALoc.t error -> Loc.t error
+module ConcreteLocPrintableErrorSet : Set.S with type elt = Loc.t printable_error
 
 (* formatters/printers *)
 
@@ -117,8 +107,8 @@ module Cli_output : sig
     flags:error_flags ->
     ?stdin_file:stdin_file ->
     strip_root: Path.t option ->
-    errors: ConcreteLocErrorSet.t ->
-    warnings: ConcreteLocErrorSet.t ->
+    errors: ConcreteLocPrintableErrorSet.t ->
+    warnings: ConcreteLocPrintableErrorSet.t ->
     lazy_msg: string option ->
     unit -> unit
 
@@ -127,8 +117,8 @@ module Cli_output : sig
     flags:error_flags ->
     ?stdin_file:stdin_file ->
     strip_root: Path.t option ->
-    errors: ConcreteLocErrorSet.t ->
-    warnings: ConcreteLocErrorSet.t ->
+    errors: ConcreteLocPrintableErrorSet.t ->
+    warnings: ConcreteLocPrintableErrorSet.t ->
     lazy_msg: string option ->
     unit -> (Profiling_js.finished option -> unit) (* print errors *)
 end
@@ -141,42 +131,42 @@ module Json_output : sig
   val json_of_errors_with_context :
     strip_root: Path.t option ->
     stdin_file: stdin_file ->
-    suppressed_errors: (Loc.t error * Utils_js.LocSet.t) list ->
+    suppressed_errors: (Loc.t printable_error * Utils_js.LocSet.t) list ->
     ?version:json_version ->
-    errors: ConcreteLocErrorSet.t ->
-    warnings: ConcreteLocErrorSet.t ->
+    errors: ConcreteLocPrintableErrorSet.t ->
+    warnings: ConcreteLocPrintableErrorSet.t ->
     unit ->
     Hh_json.json
 
   val full_status_json_of_errors :
     strip_root: Path.t option ->
-    suppressed_errors: (Loc.t error * Utils_js.LocSet.t) list ->
+    suppressed_errors: (Loc.t printable_error * Utils_js.LocSet.t) list ->
     ?version:json_version ->
     ?stdin_file:stdin_file ->
-    errors: ConcreteLocErrorSet.t ->
-    warnings: ConcreteLocErrorSet.t ->
+    errors: ConcreteLocPrintableErrorSet.t ->
+    warnings: ConcreteLocPrintableErrorSet.t ->
     unit -> (Profiling_js.finished option -> Hh_json.json)
 
   val print_errors:
     out_channel:out_channel ->
     strip_root: Path.t option ->
-    suppressed_errors: (Loc.t error * Utils_js.LocSet.t) list ->
+    suppressed_errors: (Loc.t printable_error * Utils_js.LocSet.t) list ->
     pretty:bool ->
     ?version:json_version ->
     ?stdin_file:stdin_file ->
-    errors: ConcreteLocErrorSet.t ->
-    warnings: ConcreteLocErrorSet.t ->
+    errors: ConcreteLocPrintableErrorSet.t ->
+    warnings: ConcreteLocPrintableErrorSet.t ->
     unit -> unit
 
   val format_errors:
     out_channel:out_channel ->
     strip_root: Path.t option ->
-    suppressed_errors: (Loc.t error * Utils_js.LocSet.t) list ->
+    suppressed_errors: (Loc.t printable_error * Utils_js.LocSet.t) list ->
     pretty:bool ->
     ?version:json_version ->
     ?stdin_file:stdin_file ->
-    errors: ConcreteLocErrorSet.t ->
-    warnings: ConcreteLocErrorSet.t ->
+    errors: ConcreteLocPrintableErrorSet.t ->
+    warnings: ConcreteLocPrintableErrorSet.t ->
     unit -> (Profiling_js.finished option -> unit) (* print errors *)
 end
 
@@ -187,8 +177,8 @@ module Vim_emacs_output : sig
   val print_errors:
     strip_root:Path.t option ->
     out_channel ->
-    errors:ConcreteLocErrorSet.t ->
-    warnings:ConcreteLocErrorSet.t ->
+    errors:ConcreteLocPrintableErrorSet.t ->
+    warnings:ConcreteLocPrintableErrorSet.t ->
     unit ->
     unit
 end
@@ -200,15 +190,5 @@ module Lsp_output : sig
     code: string;  (* an error code *)
     relatedLocations: (Loc.t * string) list;
   }
-  val lsp_of_error: Loc.t error -> t
-end
-
-class mapper : object
-  method error: ALoc.t error -> ALoc.t error
-  method friendly_error: Friendly.t -> Friendly.t
-  method error_kind: error_kind -> error_kind
-  method friendly_message: ALoc.t Friendly.message -> ALoc.t Friendly.message
-  method loc: ALoc.t -> ALoc.t
-  method message_feature: ALoc.t Friendly.message_feature -> ALoc.t Friendly.message_feature
-  method message_inline: Friendly.message_inline -> Friendly.message_inline
+  val lsp_of_error: Loc.t printable_error -> t
 end

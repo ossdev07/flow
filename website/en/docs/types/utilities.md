@@ -16,8 +16,9 @@ Table of contents:
 - [`$ElementType<T, K>`](#toc-elementtype)
 - [`$NonMaybeType<T>`](#toc-nonmaybe)
 - [`$ObjMap<T, F>`](#toc-objmap)
+- [`$ObjMapi<T, F>`](#toc-objmapi)
 - [`$TupleMap<T, F>`](#toc-tuplemap)
-- [`$Call<F>`](#toc-call)
+- [`$Call<F, T...>`](#toc-call)
 - [`Class<T>`](#toc-class)
 - [`$Shape<T>`](#toc-shape)
 - [`$Supertype<T>`](#toc-supertype)
@@ -83,7 +84,7 @@ In the example above, the type of `Country` is equivalent to `type Country = 'US
 
 ## `$Values<T>` <a class="toc" id="toc-values" href="#toc-values"></a>
 
-`$Values<T>` represents the union type of all the value types of the enumerable properties in an [Object Type](../objects/) `T`.
+`$Values<T>` represents the union type of all the value types (not the values, but their *types*!) of the enumerable properties in an [Object Type](../objects/) `T`.
 
 For example:
 ```js
@@ -237,9 +238,9 @@ type Person = {
   parent: Person
 };
 
-const newName: $PropertyType<Person, 'name'> = 'Michael Jackson';
-const newAge: $PropertyType<Person, 'age'> = 50;
-const newParent: $PropertyType<Person, 'parent'> = 'Joe Jackson';
+const newName: $PropertyType<Person, 'name'> = 'Toni Braxton';
+const newAge: $PropertyType<Person, 'age'> = 51;
+const newParent: $PropertyType<Person, 'parent'> = 'Evelyn Braxton';
 ```
 
 This can be especially useful for referring to the type of React props, or, even the entire `props` type itself.
@@ -393,11 +394,9 @@ This is where `ObjMap<T, F>` comes in handy.
 // @flow
 
 // let's write a function type that takes a `() => V` and returns a `V` (its return type)
-type ExtractReturnType = <V>(() => V) => V
+type ExtractReturnType = <V>(() => V) => V;
 
-function run<O: {[key: string]: Function}>(o: O): $ObjMap<O, ExtractReturnType> {
-  return Object.keys(o).reduce((acc, k) => Object.assign(acc, { [k]: o[k]() }), {});
-}
+declare function run<O: {[key: string]: Function}>(o: O): $ObjMap<O, ExtractReturnType>;
 
 const o = {
   a: () => true,
@@ -433,6 +432,33 @@ props(promises).then(o => {
 });
 ```
 
+## `$ObjMapi<T, F>` <a class="toc" id="toc-objmapi" href="#toc-objmapi"></a>
+
+`ObjMapi<T, F>` is similar to [`ObjMap<T, F>`](#toc-objmap). The difference is that function
+type `F` will be [called](#toc-call) with both the key and value types of the elements of
+the object type `T`, instead of just the value types. For example:
+
+```js
+// @flow
+const o = {
+  a: () => true,
+  b: () => 'foo'
+};
+
+type ExtractReturnObjectType = <K, V>(K, () => V) => { k: K, v: V };
+
+declare function run<O: Object>(o: O): $ObjMapi<O, ExtractReturnObjectType>;
+
+(run(o).a: { k: 'a', v: boolean }); // Ok
+(run(o).b: { k: 'b', v: string });  // Ok
+// $ExpectError
+(run(o).a: { k: 'b', v: boolean }); // Nope, a.k is "a"
+// $ExpectError
+(run(o).b: { k: 'b', v: number });  // Nope, b.v is a string
+// $ExpectError
+run(o).c;                           // Nope, c was not in the original object
+```
+
 ## `$TupleMap<T, F>` <a class="toc" id="toc-tuplemap" href="#toc-tuplemap"></a>
 
 `$TupleMap<T, F>` takes an iterable type `T` (e.g.: [`Tuple`](../tuples) or [`Array`](../arrays)), and a [function type](../functions) `F`, and returns the iterable type obtained by mapping the type of each value in the iterable with the provided function type `F`. This is analogous to the Javascript function `map`.
@@ -455,9 +481,9 @@ const arr = [() => 'foo', () => 'bar'];
 (run(arr)[1]: boolean); // Error
 ```
 
-## `$Call<F>` <a class="toc" id="toc-call" href="#toc-call"></a>
+## `$Call<F, T...>` <a class="toc" id="toc-call" href="#toc-call"></a>
 
-`$Call<F>` is a type that represents the result of calling the given [function type](../functions) `F`. This is analogous to calling a function at runtime (or more specifically, it's analogous to calling [`Function.prototype.call`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/call)), but at the type level; this means that function type calls happens statically, i.e. not at runtime.
+`$Call<F, T...>` is a type that represents the result of calling the given [function type](../functions) `F` with 0 or more arguments `T...`. This is analogous to calling a function at runtime (or more specifically, it's analogous to calling [`Function.prototype.call`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/call)), but at the type level; this means that function type calls happens statically, i.e. not at runtime.
 
 Let's see a couple of examples:
 ```js

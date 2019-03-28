@@ -49,6 +49,7 @@ type metadata = {
   suppress_types: SSet.t;
   max_workers: int;
   default_lib_dir: Path.t option;
+  trust_mode: Options.trust_mode;
 }
 
 type module_kind =
@@ -61,6 +62,9 @@ val make_sig: unit -> sig_t
 val make: sig_t -> metadata -> File_key.t -> string -> t
 val metadata_of_options: Options.t -> metadata
 
+val trust_constructor: t -> (unit -> Trust.trust)
+val cx_with_trust: t -> (unit -> Trust.trust) -> t
+
 val sig_cx: t -> sig_t
 val graph_sig: sig_t -> Constraint.node IMap.t
 val find_module_sig: sig_t -> string -> Type.t
@@ -72,7 +76,7 @@ val max_literal_length: t -> int
 val enable_const_params: t -> bool
 val enforce_strict_call_arity: t -> bool
 val envs: t -> env IMap.t
-val errors: t -> Errors.ErrorSet.t
+val errors: t -> Flow_error.ErrorSet.t
 val error_suppressions: t -> Error_suppressions.t
 val esproposal_class_static_fields: t -> Options.esproposal_feature_mode
 val esproposal_class_instance_fields: t -> Options.esproposal_feature_mode
@@ -117,6 +121,9 @@ val should_strip_root: t -> bool
 val suppress_comments: t -> Str.regexp list
 val suppress_types: t -> SSet.t
 val default_lib_dir: t -> Path.t option
+val trust_mode: t -> Options.trust_mode
+val trust_tracking: t -> bool
+val trust_errors: t -> bool
 val type_graph: t -> Graph_explorer.graph
 val type_table: t -> Type_table.t
 val type_asserts: t -> (type_assert_kind * ALoc.t) ALocMap.t
@@ -137,7 +144,7 @@ val in_declare_module: t -> bool
 
 (* mutators *)
 val add_env: t -> int -> env -> unit
-val add_error: t -> ALoc.t Errors.error -> unit
+val add_error: t -> ALoc.t Flow_error.t -> unit
 val add_error_suppression: t -> Loc.t -> unit
 val add_severity_cover: t -> File_key.t -> ExactCover.lint_severity_cover -> unit
 val add_lint_suppressions: t -> LocSet.t -> unit

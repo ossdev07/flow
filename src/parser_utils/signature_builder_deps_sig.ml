@@ -10,10 +10,23 @@ module Sort = Signature_builder_kind.Sort
 module type S = sig
   module L : Loc_sig.S
 
+  module ExpectedAnnotationSort : sig
+    type t =
+      | ArrayPattern
+      | FunctionReturn
+      | PrivateField of L.t Flow_ast.PrivateName.t
+      | Property of (L.t, L.t) Flow_ast.Expression.Object.Property.key
+      | VariableDefinition of L.t Flow_ast.Identifier.t
+
+    val property_key_to_string: (L.t, L.t) Flow_ast.Expression.Object.Property.key -> string
+    val to_string: t -> string
+  end
+
   module Error : sig
+
     type t =
       | ExpectedSort of Sort.t * string * L.t
-      | ExpectedAnnotation of L.t
+      | ExpectedAnnotation of L.t * ExpectedAnnotationSort.t
       | InvalidTypeParamUse of L.t
       | UnexpectedObjectKey of L.t (* object loc *) * L.t (* key loc *)
       | UnexpectedObjectSpread of L.t (* object loc *) * L.t (* spread loc *)
@@ -29,7 +42,7 @@ module type S = sig
 
     val debug_to_string: t -> string
   end
-  module ErrorSet: Set.S with type elt = Error.t
+  module PrintableErrorSet: Set.S with type elt = Error.t
 
   module Dep : sig
     type t =
@@ -73,7 +86,7 @@ module type S = sig
 
   module DepSet : Set.S with type elt = Dep.t
 
-  type t = DepSet.t * ErrorSet.t
+  type t = DepSet.t * PrintableErrorSet.t
 
   val join: t * t -> t
 
@@ -98,7 +111,7 @@ module type S = sig
 
   val reduce_join: ('a -> t) -> t -> 'a -> t
 
-  val recurse: (Dep.t -> ErrorSet.t) -> t -> ErrorSet.t
+  val recurse: (Dep.t -> PrintableErrorSet.t) -> t -> PrintableErrorSet.t
 
   val replace_local_with_dynamic_class: L.t Flow_ast_utils.ident -> t -> t
 end

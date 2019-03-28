@@ -25,7 +25,6 @@ val merge_component_strict:
   file_sigs: File_sig.With_ALoc.t Utils_js.FilenameMap.t ->
   get_ast_unsafe: (File_key.t -> get_ast_return) ->
   get_docblock_unsafe: (File_key.t -> Docblock.t) ->
-  ?do_gc: bool ->
   (* component *)
   File_key.t Nel.t ->
   (* requires *)
@@ -34,8 +33,8 @@ val merge_component_strict:
   Context.sig_t list ->
   (* master cx *)
   Context.sig_t ->
-  (* cxs in component order, hd is merged leader *)
-  (Context.t * (ALoc.t, ALoc.t * Type.t) Flow_ast.program) Nel.t
+  (* cxs in component order, hd is merged leader, along with a coverage summary for each file *)
+  (Context.t * (ALoc.t, ALoc.t * Type.t) Flow_ast.program * Coverage.file_coverage) Nel.t
 
 val merge_tvar: Context.t -> Reason.t -> Constraint.ident -> Type.t
 

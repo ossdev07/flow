@@ -13,7 +13,10 @@ let layout_of_node comments node =
   Js_layout_generator.with_attached_comments := comments;
   let layout = match node with
   | Raw str -> Layout.Atom str
+  | Comment c -> Js_layout_generator.comment c
+  | NumberLiteralNode t -> Js_layout_generator.number_literal_type t
   | Literal lit -> Js_layout_generator.literal lit
+  | StringLiteral lit -> Js_layout_generator.string_literal_type lit
   | Statement stmt -> Js_layout_generator.statement stmt
   | Program ast -> Js_layout_generator.program ~preserve_docblock:true ~checksum:None ast
   | Expression expr ->
@@ -25,7 +28,6 @@ let layout_of_node comments node =
       Js_layout_generator.expression expr;
       Layout.Atom ")";
     ]
-  | Identifier id -> Js_layout_generator.identifier id
   | Pattern pat -> Js_layout_generator.pattern pat
   | Params params -> Js_layout_generator.arrow_function_params params
   | Variance var -> Js_layout_generator.variance var

@@ -49,6 +49,7 @@ type metadata = {
   suppress_types: SSet.t;
   max_workers: int;
   default_lib_dir : Path.t option;
+  trust_mode: Options.trust_mode
 }
 
 type module_kind =
@@ -92,7 +93,7 @@ type sig_t = {
   (* map from TypeAssert assertion locations to the type being asserted *)
   mutable type_asserts: (type_assert_kind * ALoc.t) ALocMap.t;
 
-  mutable errors: Errors.ErrorSet.t;
+  mutable errors: Flow_error.ErrorSet.t;
 
   mutable error_suppressions: Error_suppressions.t;
   mutable severity_cover: ExactCover.lint_severity_cover Utils_js.FilenameMap.t;
@@ -139,6 +140,7 @@ type t = {
   mutable require_map: Type.t ALocMap.t;
 
   type_table: Type_table.t;
+  trust_constructor: unit -> Trust.trust;
 
   mutable declare_module_ref: string option;
 
@@ -177,6 +179,7 @@ let metadata_of_options options = {
   suppress_comments = Options.suppress_comments options;
   suppress_types = Options.suppress_types options;
   default_lib_dir = (Options.file_options options).Files.default_lib_dir;
+  trust_mode = Options.trust_mode options;
 }
 
 let empty_use_def = Scope_api.{ max_distinct = 0; scopes = IMap.empty }, ALocMap.empty
@@ -192,7 +195,7 @@ let make_sig () = {
   envs = IMap.empty;
   module_map = SMap.empty;
   type_asserts = ALocMap.empty;
-  errors = Errors.ErrorSet.empty;
+  errors = Flow_error.ErrorSet.empty;
   error_suppressions = Error_suppressions.empty;
   severity_cover = Utils_js.FilenameMap.empty;
   exists_checks = ALocMap.empty;
@@ -223,6 +226,8 @@ let make sig_cx metadata file module_ref = {
 
   type_table = Type_table.create ();
 
+  trust_constructor = Trust.literal_trust;
+
   declare_module_ref = None;
 
   use_def = empty_use_def;
@@ -250,6 +255,9 @@ let in_declare_module cx =
 (* accessors *)
 let all_unresolved cx = cx.sig_cx.all_unresolved
 let envs cx = cx.sig_cx.envs
+let trust_constructor cx = cx.trust_constructor
+
+let cx_with_trust cx trust = { cx with trust_constructor = trust }
 
 let metadata cx = cx.metadata
 let max_literal_length cx = cx.metadata.max_literal_length
@@ -318,13 +326,21 @@ let default_lib_dir cx = cx.metadata.default_lib_dir
 let type_asserts cx = cx.sig_cx.type_asserts
 let type_graph cx = cx.sig_cx.type_graph
 let type_table cx = cx.type_table
+let trust_mode cx = cx.metadata.trust_mode
 let verbose cx = cx.metadata.verbose
 let max_workers cx = cx.metadata.max_workers
 let jsx cx = cx.metadata.jsx
 let exists_checks cx = cx.sig_cx.exists_checks
 let exists_excuses cx = cx.sig_cx.exists_excuses
 let use_def cx = cx.use_def
-
+let trust_tracking cx =
+  match cx.metadata.trust_mode with
+  | Options.CheckTrust | Options.SilentTrust -> true
+  | Options.NoTrust -> false
+let trust_errors cx =
+  match cx.metadata.trust_mode with
+  | Options.CheckTrust -> true
+  | Options.SilentTrust | Options.NoTrust -> false
 let pid_prefix (cx: t) =
   if max_workers cx > 0
   then Printf.sprintf "[%d] " (Unix.getpid ())
@@ -344,7 +360,7 @@ let copy_of_context cx = {
 let add_env cx frame env =
   cx.sig_cx.envs <- IMap.add frame env cx.sig_cx.envs
 let add_error cx error =
-  cx.sig_cx.errors <- Errors.ErrorSet.add error cx.sig_cx.errors
+  cx.sig_cx.errors <- Flow_error.ErrorSet.add error cx.sig_cx.errors
 let add_error_suppression cx loc =
   cx.sig_cx.error_suppressions <-
     Error_suppressions.add loc cx.sig_cx.error_suppressions
@@ -373,7 +389,7 @@ let add_nominal_id cx id =
 let add_type_assert cx k v =
   cx.sig_cx.type_asserts <- ALocMap.add k v cx.sig_cx.type_asserts
 let remove_all_errors cx =
-  cx.sig_cx.errors <- Errors.ErrorSet.empty
+  cx.sig_cx.errors <- Flow_error.ErrorSet.empty
 let remove_all_error_suppressions cx =
   cx.sig_cx.error_suppressions <- Error_suppressions.empty
 let remove_all_lint_severities cx =
@@ -531,7 +547,7 @@ let merge_into sig_cx sig_cx_other =
      these things from the lib cxs into the master sig_cx before we clear the
      indeterminates and calculate the sig sig_cx. *)
   sig_cx.envs <- IMap.union sig_cx_other.envs sig_cx.envs;
-  sig_cx.errors <- Errors.ErrorSet.union sig_cx_other.errors sig_cx.errors;
+  sig_cx.errors <- Flow_error.ErrorSet.union sig_cx_other.errors sig_cx.errors;
   sig_cx.error_suppressions <- Error_suppressions.union sig_cx_other.error_suppressions sig_cx.error_suppressions;
   sig_cx.severity_cover <- Utils_js.FilenameMap.union sig_cx_other.severity_cover sig_cx.severity_cover;
   sig_cx.exists_checks <- ALocMap.union sig_cx_other.exists_checks sig_cx.exists_checks;

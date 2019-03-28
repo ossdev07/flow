@@ -1,3 +1,51 @@
+### 0.95.2
+
+* The inferred statics object type of `React.createClass({})` will contain `defaultProps: void`, instead of `defaultProps: {||}` (unsealed empty object).
+* Bug fix in internal cache mechanism
+
+### 0.95.1
+
+* Added an overload for `JSON.stringify` allowing `mixed` input, which returns `string | void`. Without this, you can't call `JSON.stringify` on a `mixed` value at all, because while Flow does allow refining `mixed` to "not void" (e.g. `x === undefined ? undefined : JSON.stringify(x)`), it does not support refining `mixed` to "not a function" (e.g. imagine you could do `x === undefined || typeof x == 'function' ? undefined : JSON.stringify(x)`). This rolls back some of the more restrictive behavior introduced in v0.95.0, but is still more restrictive and more accurate than in <= v0.94.0.
+
+### 0.95.0
+
+Likely to cause new Flow errors:
+* Disallow `undefined` and functions in `JSON.stringify`: `JSON.stringify(undefined)` returns `undefined` instead of `string`. Rather than make it always return `string | void`, or use overloads to return `void` on those inputs, we instead disallow those inputs since they are rarely the intended behavior. (#7447)
+
+New features:
+* `flow batch-coverage`: A new command to compute aggregate coverage for directories and file lists. Instead of producing the coverage at each location, it sums them and reports the per-file percentage and the aggregate percentage.
+
+Bug fixes:
+* Fixed incorrect reporting of signature verification lint errors in unchecked files
+
+Other improvements:
+* #7459 Add type for Symbol.prototype.description (thanks @dnalborczyk)
+* #7452 Add types for String.prototype.trimStart/trimEnd (thanks @dnalborczyk)
+* #7500 The "kind" of an autocomplete result is now reported over the Language Server Protocol, improving the autocomplete UI (thanks @vicapow)
+
+### 0.94.0
+
+Bug fixes:
+* Fixed `dynamic-exports` lint's spurious errors on exported classes and functions
+* Handle package.json files that are valid JSON but invalid packages
+
+Performance:
+* Reduce memory usage by filtering suppressed lint errors before formatting the errors for printing
+* Quicker responses to cancellation requests
+
+Many libdef fixes and other improvements from the open source community:
+* #3209 Fix autocomplete for generic type aliases (thanks @vkurchatkin!)
+* #6750 Remove shadowed generics in `Proxy$traps` (thanks @talbenari1!)
+* #6000 Document async function return type (thanks @callumlocke!)
+* #7448 Tweaks to built-in http module (thanks @STRML!)
+* #4570 Update types for Web Audio API (thanks @fand!)
+* #5836 Fix examples in libdefs/creation page (thanks @tomasz-sodzawiczny!)
+
+Additional lib def improvements:
+* Make `current` write-only in `React.Ref` - allowing union types for ref
+* Add `setMediaKeys` API to definition of `HTMLMediaElement`
+* Make type parameter to `http$Agent` covariant
+
 ### 0.93.0
 
 Likely to cause new Flow errors:

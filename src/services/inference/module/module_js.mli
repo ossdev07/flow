@@ -29,7 +29,7 @@ val exported_module:
 
 type resolution_acc = {
   mutable paths: SSet.t;
-  mutable errors: Flow_error.error_message list;
+  mutable errors: Error_message.t list;
 }
 val imported_module:
   options: Options.t ->
@@ -96,9 +96,9 @@ val add_parsed_resolved_requires:
   options:Options.t ->
   node_modules_containers: SSet.t ->
   File_key.t ->
-  Errors.ErrorSet.t
+  Flow_error.ErrorSet.t
 
-val add_package: string -> (Loc.t, Loc.t) Flow_ast.program -> unit
+val add_package: string -> Loc.t Package_json.t_or_error -> unit
 
 val package_incompatible: reader:State_reader.t -> string -> (Loc.t, Loc.t) Flow_ast.program -> bool
 

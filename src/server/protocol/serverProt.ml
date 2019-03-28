@@ -19,6 +19,7 @@ module Request = struct
       wait_for_recheck: bool option;
     }
   | COVERAGE of { input: File_input.t; force: bool; wait_for_recheck: bool option; }
+  | BATCH_COVERAGE of { batch : string list; wait_for_recheck: bool option; }
   | CYCLE of { filename: string; }
   | DUMP_TYPES of { input: File_input.t; wait_for_recheck: bool option; }
   | FIND_MODULE of { moduleref: string; filename: string; wait_for_recheck: bool option; }
@@ -48,6 +49,7 @@ module Request = struct
       char: int;
       verbose: Verbose.t option;
       expand_aliases: bool;
+      omit_targ_defaults: bool;
       wait_for_recheck: bool option;
     }
   | REFACTOR of {
@@ -68,6 +70,8 @@ module Request = struct
     Printf.sprintf "autocomplete %s" (File_input.filename_of_file_input input)
   | CHECK_FILE { input; verbose=_; force=_; include_warnings=_; wait_for_recheck=_; } ->
     Printf.sprintf "check %s" (File_input.filename_of_file_input input)
+  | BATCH_COVERAGE { batch=_; wait_for_recheck=_; } ->
+      Printf.sprintf "%s" "batch-coverage"
   | COVERAGE { input; force=_; wait_for_recheck=_; } ->
       Printf.sprintf "coverage %s" (File_input.filename_of_file_input input)
   | CYCLE { filename; } ->
@@ -89,7 +93,7 @@ module Request = struct
         (File_input.filename_of_file_input filename) line char
   | GET_IMPORTS { module_names; wait_for_recheck=_; } ->
       Printf.sprintf "get-imports %s" (String.concat " " module_names)
-  | INFER_TYPE { input; line; char; verbose=_; expand_aliases=_; wait_for_recheck=_; } ->
+  | INFER_TYPE { input; line; char; verbose=_; expand_aliases=_; omit_targ_defaults=_; wait_for_recheck=_; } ->
       Printf.sprintf "type-at-pos %s:%d:%d"
         (File_input.filename_of_file_input input) line char
   | REFACTOR { input; line; char; refactor_variant; } ->
@@ -113,6 +117,11 @@ end
 
 module Response = struct
 
+  type lazy_stats = {
+    lazy_mode: Options.lazy_mode option;
+    checked_files: int;
+    total_files: int;
+  }
   (* Details about functions to be added in json output *)
   type func_param_result = {
       param_name     : string;
@@ -128,6 +137,7 @@ module Response = struct
   type complete_autocomplete_result = {
       res_loc      : Loc.t;
       res_ty       : string;
+      res_kind     : Lsp.Completion.completionItemKind option;
       res_name     : string;
       func_details : func_details_result option;
     }
@@ -139,6 +149,11 @@ module Response = struct
 
   type coverage_response = (
     (Loc.t * Coverage.Kind.t) list,
+    string
+  ) result
+
+  type batch_coverage_response = (
+    (File_key.t * Coverage.file_coverage) list,
     string
   ) result
 
@@ -167,12 +182,12 @@ module Response = struct
 
   type suggest_result =
   | Suggest_Ok of {
-      tc_errors: Errors.ConcreteLocErrorSet.t;
-      tc_warnings: Errors.ConcreteLocErrorSet.t;
-      suggest_warnings: Errors.ConcreteLocErrorSet.t;
+      tc_errors: Errors.ConcreteLocPrintableErrorSet.t;
+      tc_warnings: Errors.ConcreteLocPrintableErrorSet.t;
+      suggest_warnings: Errors.ConcreteLocPrintableErrorSet.t;
       annotated_program: (Loc.t, Loc.t) Flow_ast.program;
     }
-  | Suggest_Error of Errors.ConcreteLocErrorSet.t
+  | Suggest_Error of Errors.ConcreteLocPrintableErrorSet.t
 
   type suggest_response = (
     suggest_result,
@@ -182,15 +197,6 @@ module Response = struct
   type graph_response = (graph_response_subgraph, string) result
   and graph_response_subgraph = (string * string list) list
 
-  type gen_flow_files_error =
-    | GenFlowFiles_TypecheckError of {errors: Errors.ErrorSet.t; warnings: Errors.ErrorSet.t}
-    | GenFlowFiles_UnexpectedError of string
-  type gen_flow_files_result =
-    | GenFlowFiles_FlowFile of string
-    | GenFlowFiles_NonFlowFile
-  type gen_flow_files_response =
-    ((string * gen_flow_files_result) list, gen_flow_files_error) result
-
   type directory_mismatch = {
     server: Path.t;
     client: Path.t;
@@ -198,15 +204,9 @@ module Response = struct
 
   type status_response =
   | DIRECTORY_MISMATCH of directory_mismatch
-  | ERRORS of {errors: Errors.ConcreteLocErrorSet.t; warnings: Errors.ConcreteLocErrorSet.t}
+  | ERRORS of {errors: Errors.ConcreteLocPrintableErrorSet.t; warnings: Errors.ConcreteLocPrintableErrorSet.t}
   | NO_ERRORS
   | NOT_COVERED
-
-  type lazy_stats = {
-    lazy_mode: Options.lazy_mode option;
-    checked_files: int;
-    total_files: int;
-  }
 
   type check_file_response = status_response
 
@@ -216,12 +216,12 @@ module Response = struct
   | AUTOCOMPLETE of autocomplete_response
   | CHECK_FILE of check_file_response
   | COVERAGE of coverage_response
+  | BATCH_COVERAGE of batch_coverage_response
   | CYCLE of graph_response
   | GRAPH_DEP_GRAPH of (unit, string) result
   | DUMP_TYPES of dump_types_response
   | FIND_MODULE of find_module_response
   | FIND_REFS of find_refs_response
-  | GEN_FLOW_FILES of gen_flow_files_response
   | GET_DEF of get_def_response
   | GET_IMPORTS of get_imports_response
   | INFER_TYPE of infer_type_response
@@ -235,12 +235,12 @@ module Response = struct
   | AUTOCOMPLETE _ -> "autocomplete response"
   | CHECK_FILE _ -> "check_file response"
   | COVERAGE _ -> "coverage response"
+  | BATCH_COVERAGE _ -> "batch-coverage response"
   | CYCLE _ -> "cycle response"
   | GRAPH_DEP_GRAPH _ -> "dep-graph response"
   | DUMP_TYPES _ -> "dump_types response"
   | FIND_MODULE _ -> "find_module response"
   | FIND_REFS _ -> "find_refs response"
-  | GEN_FLOW_FILES _ -> "gen_flow_files response"
   | GET_DEF _ -> "get_def response"
   | GET_IMPORTS _ -> "get_imports response"
   | INFER_TYPE _ -> "infer_type response"

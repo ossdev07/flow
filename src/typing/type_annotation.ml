@@ -13,7 +13,6 @@ open Reason
 open Type
 open Env.LookupMode
 
-module FlowError = Flow_error
 module Flow = Flow_js
 module T = Ast.Type
 
@@ -49,12 +48,12 @@ let check_type_arg_arity cx loc t_ast params n f =
     if n = 0 then
       f ()
     else
-      error_type cx loc (FlowError.ETypeParamArity (loc, n)) t_ast
+      error_type cx loc (Error_message.ETypeParamArity (loc, n)) t_ast
   | Some (_, l) ->
     if n = List.length l && n <> 0 then
       f ()
     else
-      error_type cx loc (FlowError.ETypeParamArity (loc, n)) t_ast
+      error_type cx loc (Error_message.ETypeParamArity (loc, n)) t_ast
 
 let mk_custom_fun cx loc t_ast targs (id_loc, name, comments) kind =
   check_type_arg_arity cx loc t_ast targs 0 (fun () ->
@@ -74,13 +73,13 @@ let mk_react_prop_type cx loc t_ast targs id kind =
 let add_unclear_type_error_if_not_lib_file cx loc =
   match ALoc.source loc with
     | Some file when not @@ File_key.is_lib_file file ->
-      Flow_js.add_output cx (FlowError.EUnclearType loc)
+      Flow_js.add_output cx (Error_message.EUnclearType loc)
     | _ -> ()
 
 let add_deprecated_type_error_if_not_lib_file cx loc =
   match ALoc.source loc with
     | Some file when not @@ File_key.is_lib_file file ->
-      Flow_js.add_output cx (FlowError.EDeprecatedType loc)
+      Flow_js.add_output cx (Error_message.EDeprecatedType loc)
     | _ -> ()
 
 let polarity = Ast.Variance.(function
@@ -99,31 +98,31 @@ let rec convert cx tparams_map = Ast.Type.(function
   add_unclear_type_error_if_not_lib_file cx loc;
   (loc, AnyT.at Annotated loc), t_ast
 
-| loc, (Mixed as t_ast) -> (loc, MixedT.at loc), t_ast
+| loc, (Mixed as t_ast) -> (loc, MixedT.at loc |> with_trust annot_trust), t_ast
 
-| loc, (Empty as t_ast) -> (loc, EmptyT.at loc), t_ast
+| loc, (Empty as t_ast) -> (loc, EmptyT.at loc |> with_trust annot_trust), t_ast
 
-| loc, (Void as t_ast) -> (loc, VoidT.at loc), t_ast
+| loc, (Void as t_ast) -> (loc, VoidT.at loc |> with_trust annot_trust), t_ast
 
-| loc, (Null as t_ast) -> (loc, NullT.at loc), t_ast
+| loc, (Null as t_ast) -> (loc, NullT.at loc |> with_trust annot_trust), t_ast
 
-| loc, (Number as t_ast) -> (loc, NumT.at loc), t_ast
+| loc, (Number as t_ast) -> (loc, NumT.at loc |> with_trust annot_trust), t_ast
 
-| loc, (String as t_ast) -> (loc, StrT.at loc), t_ast
+| loc, (String as t_ast) -> (loc, StrT.at loc |> with_trust annot_trust), t_ast
 
-| loc, (Boolean as t_ast) -> (loc, BoolT.at loc), t_ast
+| loc, (Boolean as t_ast) -> (loc, BoolT.at loc |> with_trust annot_trust), t_ast
 
 | loc, Nullable t ->
     let (_, t), _ as t_ast = convert cx tparams_map t in
     let reason = annot_reason (mk_reason (RMaybe (desc_of_t t)) loc) in
-    (loc, DefT (reason, bogus_trust (), MaybeT t)), Nullable t_ast
+    (loc, MaybeT (reason, t)), Nullable t_ast
 
 | loc, Union (t0, t1, ts) ->
   let (_, t0), _ as t0_ast = convert cx tparams_map t0 in
   let (_, t1), _ as t1_ast = convert cx tparams_map t1 in
   let ts, ts_ast = convert_list cx tparams_map ts in
   let rep = UnionRep.make t0 t1 (ts) in
-  (loc, DefT (mk_reason RUnionType loc, bogus_trust (), UnionT rep)),
+  (loc, UnionT (mk_reason RUnionType loc, rep)),
   Union (t0_ast, t1_ast, ts_ast)
 
 | loc, Intersection (t0, t1, ts) ->
@@ -131,7 +130,7 @@ let rec convert cx tparams_map = Ast.Type.(function
   let (_, t1), _ as t1_ast = convert cx tparams_map t1 in
   let ts, ts_ast = convert_list cx tparams_map ts in
   let rep = InterRep.make t0 t1 ts in
-  (loc, DefT (mk_reason RIntersectionType loc, bogus_trust (), IntersectionT rep)),
+  (loc, IntersectionT (mk_reason RIntersectionType loc, rep)),
   Intersection (t0_ast, t1_ast, ts_ast)
 
 | loc, Typeof x as t_ast ->
@@ -147,7 +146,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       (loc, Flow.mk_typeof_annotation cx reason valtype),
       Typeof ((q_loc, valtype), Generic { Generic.id = qualification_ast; targs = None })
   | q_loc, _ ->
-    error_type cx loc (FlowError.EUnexpectedTypeof q_loc) t_ast
+    error_type cx loc (Error_message.EUnexpectedTypeof q_loc) t_ast
   end
 
 | loc, Tuple ts ->
@@ -155,7 +154,7 @@ let rec convert cx tparams_map = Ast.Type.(function
   let reason = annot_reason (mk_reason RTupleType loc) in
   let element_reason = mk_reason RTupleElement loc in
   let elemt = match tuple_types with
-  | [] -> EmptyT.why element_reason
+  | [] -> EmptyT.why element_reason |> with_trust bogus_trust
   | [t] -> t
   | t0::t1::ts ->
     (* If a tuple should be viewed as an array, what would the element type of
@@ -174,14 +173,14 @@ let rec convert cx tparams_map = Ast.Type.(function
        that, we use the following closest approximation, that behaves like a
        union as a lower bound but `any` as an upper bound.
     *)
-    AnyWithLowerBoundT (DefT (element_reason, bogus_trust (), UnionT (UnionRep.make t0 t1 ts)))
+    AnyWithLowerBoundT (UnionT (element_reason, UnionRep.make t0 t1 ts))
   in
-  (loc, DefT (reason, bogus_trust (), ArrT (TupleAT (elemt, tuple_types)))), Tuple ts_ast
+  (loc, DefT (reason, annot_trust (), ArrT (TupleAT (elemt, tuple_types)))), Tuple ts_ast
 
 | loc, Array t ->
   let r = mk_reason RArrayType loc in
   let (_, elemt), _ as t_ast = convert cx tparams_map t in
-  (loc, DefT (r, bogus_trust (), ArrT (ArrayAT (elemt, None)))), Array t_ast
+  (loc, DefT (r, annot_trust (), ArrT (ArrayAT (elemt, None)))), Array t_ast
 
 | loc, (StringLiteral { Ast.StringLiteral.value; _ } as t_ast) ->
   (loc, mk_singleton_string loc value), t_ast
@@ -256,7 +255,7 @@ let rec convert cx tparams_map = Ast.Type.(function
           reconstruct_ast
             (DefT (replace_reason_const RNumber r, trust, NumT (Literal (None, num_lit))))
             targs
-        | _ -> error_type cx loc (FlowError.EUnexpectedTemporaryBaseType loc) t_ast
+        | _ -> error_type cx loc (Error_message.EUnexpectedTemporaryBaseType loc) t_ast
     )
 
   | "$TEMPORARY$string" ->
@@ -267,7 +266,7 @@ let rec convert cx tparams_map = Ast.Type.(function
           reconstruct_ast
             (DefT (replace_reason_const RString r, trust, StrT (Literal (None, str_lit))))
             targs
-        | _ -> error_type cx loc (FlowError.EUnexpectedTemporaryBaseType loc) t_ast
+        | _ -> error_type cx loc (Error_message.EUnexpectedTemporaryBaseType loc) t_ast
     )
 
   | "$TEMPORARY$boolean" ->
@@ -278,7 +277,7 @@ let rec convert cx tparams_map = Ast.Type.(function
           reconstruct_ast
             (DefT (replace_reason_const RBoolean r, trust, BoolT (Some bool)))
             targs
-        | _ -> error_type cx loc (FlowError.EUnexpectedTemporaryBaseType loc) t_ast
+        | _ -> error_type cx loc (Error_message.EUnexpectedTemporaryBaseType loc) t_ast
     )
 
   | "$TEMPORARY$Object$freeze" ->
@@ -311,7 +310,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       let elemts, targs = convert_type_params () in
       let elemt = List.hd elemts in
       reconstruct_ast
-        (DefT (mk_reason RArrayLit loc, bogus_trust (), ArrT (ArrayAT (elemt, None))))
+        (DefT (mk_reason RArrayLit loc, annot_trust (), ArrT (ArrayAT (elemt, None))))
         targs
   )
 
@@ -321,7 +320,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       let elemts, targs = convert_type_params () in
       let elemt = List.hd elemts in
       reconstruct_ast
-        (DefT (mk_reason RArrayType loc, bogus_trust (), ArrT (ArrayAT (elemt, None))))
+        (DefT (mk_reason RArrayType loc, annot_trust (), ArrT (ArrayAT (elemt, None))))
         targs
     )
 
@@ -331,14 +330,14 @@ let rec convert cx tparams_map = Ast.Type.(function
       let elemts, targs = convert_type_params () in
       let elemt = List.hd elemts in
       reconstruct_ast
-        (DefT (annot_reason (mk_reason RROArrayType loc), bogus_trust (), ArrT (ROArrayAT (elemt))))
+        (DefT (annot_reason (mk_reason RROArrayType loc), annot_trust (), ArrT (ROArrayAT (elemt))))
         targs
     )
 
   (* These utilities are no longer supported *)
   (* $Supertype<T> acts as any over supertypes of T *)
   | "$Supertype" ->
-    FlowError.EDeprecatedUtility (loc, name) |> Flow_js.add_output cx;
+    Error_message.EDeprecatedUtility (loc, name) |> Flow_js.add_output cx;
     check_type_arg_arity cx loc t_ast targs 1 (fun () ->
       let ts, targs = convert_type_params () in
       let t = List.hd ts in
@@ -347,7 +346,7 @@ let rec convert cx tparams_map = Ast.Type.(function
 
   (* $Subtype<T> acts as any over subtypes of T *)
   | "$Subtype" ->
-    FlowError.EDeprecatedUtility (loc, name) |> Flow_js.add_output cx;
+    Error_message.EDeprecatedUtility (loc, name) |> Flow_js.add_output cx;
     check_type_arg_arity cx loc t_ast targs 1 (fun () ->
       let ts, targs = convert_type_params () in
       let t = List.hd ts in
@@ -365,7 +364,7 @@ let rec convert cx tparams_map = Ast.Type.(function
             (use_op reason, reason, PropertyType key), mk_id()))
           targs
       | _ ->
-        error_type cx loc (FlowError.EPropertyTypeAnnot loc) t_ast
+        error_type cx loc (Error_message.EPropertyTypeAnnot loc) t_ast
     )
 
   (* $ElementType<T, string> acts as the type of the string elements in object
@@ -498,7 +497,7 @@ let rec convert cx tparams_map = Ast.Type.(function
               [ (str_loc, str_t),  StringLiteral { Ast.StringLiteral.value; raw } ]
             ))
       | _ ->
-          error_type cx loc (FlowError.EExportsAnnot loc) t_ast
+          error_type cx loc (Error_message.EExportsAnnot loc) t_ast
     )
 
   | "$Call" ->
@@ -509,7 +508,7 @@ let rec convert cx tparams_map = Ast.Type.(function
         (EvalT (fn, TypeDestructorT (use_op reason, reason, CallType args), mk_id ()))
         targs
     | _ ->
-      error_type cx loc (FlowError.ETypeParamMinArity (loc, 1)) t_ast)
+      error_type cx loc (Error_message.ETypeParamMinArity (loc, 1)) t_ast)
 
   | "$TupleMap" ->
     check_type_arg_arity cx loc t_ast targs 2 (fun () ->
@@ -553,13 +552,13 @@ let rec convert cx tparams_map = Ast.Type.(function
         let char_str = String_utils.CharSet.to_string chars in (* sorts them *)
         let reason = mk_reason (RCustom (spf "character set `%s`" char_str)) loc in
         reconstruct_ast
-          (DefT (reason, bogus_trust (), CharSetT chars))
+          (DefT (reason, annot_trust (), CharSetT chars))
           (Some (
             targs_loc,
             [ (str_loc, str_t), StringLiteral { Ast.StringLiteral.value; raw } ]
           ))
       | _ ->
-        error_type cx loc (FlowError.ECharSetAnnot loc) t_ast
+        error_type cx loc (Error_message.ECharSetAnnot loc) t_ast
     )
 
   | "this" ->
@@ -572,7 +571,7 @@ let rec convert cx tparams_map = Ast.Type.(function
         reconstruct_ast (Flow.reposition cx loc (SMap.find_unsafe "this" tparams_map)) None
       )
     else (
-      Flow.add_output cx (FlowError.EUnexpectedThisType loc);
+      Flow.add_output cx (Error_message.EUnexpectedThisType loc);
       Tast_utils.error_mapper#type_ t_ast
 
     )
@@ -583,7 +582,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       let ts, targs = convert_type_params () in
       let t = List.hd ts in
       let reason = mk_reason (RStatics (desc_of_t t)) loc in
-      reconstruct_ast (DefT (reason, bogus_trust (), ClassT t)) targs
+      reconstruct_ast (DefT (reason, annot_trust (), ClassT t)) targs
     )
 
   | "Function" | "function" ->
@@ -635,7 +634,7 @@ let rec convert cx tparams_map = Ast.Type.(function
         let ts, targs = convert_type_params () in
         let config = List.nth ts 0 in
         let instance = List.nth ts 1 in
-        reconstruct_ast (DefT (mk_reason (RCustom "AbstractComponent") loc, bogus_trust (),
+        reconstruct_ast (DefT (mk_reason (RCustom "AbstractComponent") loc, annot_trust (),
           ReactAbstractComponentT {config; instance})) targs
       )
   | "React$Config" ->
@@ -789,9 +788,9 @@ let rec convert cx tparams_map = Ast.Type.(function
           Core_list.map ~f:(fun i -> Some ("x_" ^ Pervasives.string_of_int i)) in
         let emp = Key_map.empty in
         let tins = Unsoundness.at FunctionPrototype loc |> ListUtils.repeat n in
-        let tout = OpenPredT (out_reason, MixedT.at loc, emp, emp) in
+        let tout = OpenPredT (out_reason, MixedT.at loc |> with_trust bogus_trust, emp, emp) in
         reconstruct_ast
-          (DefT (fun_reason, bogus_trust (), FunT (
+          (DefT (fun_reason, annot_trust (), FunT (
             dummy_static static_reason,
             mk_reason RPrototype loc |> Unsoundness.function_proto_any,
             mk_functiontype fun_reason tins tout
@@ -801,7 +800,7 @@ let rec convert cx tparams_map = Ast.Type.(function
           targs
 
       | _ ->
-        error_type cx loc (FlowError.EPredAnnot loc) t_ast
+        error_type cx loc (Error_message.EPredAnnot loc) t_ast
     )
 
   | "$Refine" ->
@@ -815,29 +814,31 @@ let rec convert cx tparams_map = Ast.Type.(function
             (EvalT (base_t, DestructuringT (reason, Refine pred), mk_id()))
             targs
       | _ ->
-        error_type cx loc (FlowError.ERefineAnnot loc) t_ast
+        error_type cx loc (Error_message.ERefineAnnot loc) t_ast
     )
   | "$Trusted" ->
     check_type_arg_arity cx loc t_ast targs 1 (fun () ->
       match convert_type_params () with
-      | [DefT (_, _, AnyT _)], _ ->
-          error_type cx loc (FlowError.ETrustedAnnot loc) t_ast
+      | [AnyT _], _ ->
+          error_type cx loc (Error_message.ETrustedAnnot loc) t_ast
       | [DefT (rs, trust, ty)], targs ->
           reconstruct_ast
-            (DefT (rs, make_trusted trust, ty))
+            (DefT (annot_reason
+              (mk_reason (RTrusted (desc_of_reason rs)) loc), make_trusted trust, ty))
             targs
       | _ ->
-        error_type cx loc (FlowError.ETrustedAnnot loc) t_ast
+        error_type cx loc (Error_message.ETrustedAnnot loc) t_ast
     )
   | "$Private" ->
     check_type_arg_arity cx loc t_ast targs 1 (fun () ->
       match convert_type_params () with
       | [DefT (rs, trust, ty)], targs ->
           reconstruct_ast
-            (DefT (rs, make_private trust, ty))
+            (DefT (annot_reason
+              (mk_reason (RPrivate (desc_of_reason rs)) loc), make_private trust, ty))
             targs
       | _ ->
-        error_type cx loc (FlowError.EPrivateAnnot loc) t_ast
+        error_type cx loc (Error_message.EPrivateAnnot loc) t_ast
     )
   (* other applications with id as head expr *)
   | _ ->
@@ -895,7 +896,7 @@ let rec convert cx tparams_map = Ast.Type.(function
 
   let (_, return_t), _ as return_ast = convert cx tparams_map return in
   let ft =
-    DefT (reason, bogus_trust (), FunT (
+    DefT (reason, annot_trust (), FunT (
       dummy_static reason,
       mk_reason RPrototype loc |> Unsoundness.function_proto_any,
       {
@@ -937,7 +938,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       | t0::t1::ts ->
         let callable_reason = mk_reason (RCustom "callable object type") loc in
         let rep = InterRep.make t0 t1 ts in
-        let t = DefT (callable_reason, bogus_trust (), IntersectionT rep) in
+        let t = IntersectionT (callable_reason, rep) in
         Some t
     in
     (* Previously, call properties were stored in the props map under the key
@@ -980,7 +981,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       exact;
       frozen = false
     } in
-    DefT (mk_reason reason_desc loc, bogus_trust (),
+    DefT (mk_reason reason_desc loc, annot_trust (),
       ObjT (mk_objecttype ~flags ~dict ~call pmap proto))
   in
   let property loc prop props proto call_deprecated =
@@ -998,7 +999,7 @@ let rec convert cx tparams_map = Ast.Type.(function
          $call properties. Previously, if both were present, the $call property
          was ignored, but is now left as a named property. *)
       | Ast.Expression.Object.Property.Identifier (loc, { Ast.Identifier.name= "$call"; comments }) ->
-          Flow.add_output cx Flow_error.(EDeprecatedCallSyntax loc);
+          Flow.add_output cx Error_message.(EDeprecatedCallSyntax loc);
           let (_, t), _ as value_ast = convert cx tparams_map value in
           let t = if optional then Type.optional t else t in
           let key = Ast.Expression.Object.Property.Identifier ((loc, t), mk_commented_ident t comments "$call") in
@@ -1039,7 +1040,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       | Ast.Expression.Object.Property.PrivateName (loc, _)
       | Ast.Expression.Object.Property.Computed (loc, _)
           ->
-        Flow.add_output cx (FlowError.EUnsupportedKeyInObjectType loc);
+        Flow.add_output cx (Error_message.EUnsupportedKeyInObjectType loc);
         let _, prop_ast = Tast_utils.error_mapper#object_property_type (loc, prop) in
         props, proto, call_deprecated, prop_ast
       end
@@ -1049,7 +1050,7 @@ let rec convert cx tparams_map = Ast.Type.(function
         key = Ast.Expression.Object.Property.Identifier (id_loc, { Ast.Identifier.name; comments });
         value = Object.Property.Get (loc, f);
         _method; _ } ->
-      Flow_js.add_output cx (FlowError.EUnsafeGettersSetters loc);
+      Flow_js.add_output cx (Error_message.EUnsafeGettersSetters loc);
       let function_type, f_ast =
         match convert cx tparams_map (loc, Ast.Type.Function f) with
         | (_, function_type), Ast.Type.Function f_ast -> function_type, f_ast
@@ -1069,7 +1070,7 @@ let rec convert cx tparams_map = Ast.Type.(function
         key = Ast.Expression.Object.Property.Identifier (id_loc, { Ast.Identifier.name; comments });
         value = Object.Property.Set (loc, f);
         _method; _ } ->
-      Flow_js.add_output cx (FlowError.EUnsafeGettersSetters loc);
+      Flow_js.add_output cx (Error_message.EUnsafeGettersSetters loc);
       let function_type, f_ast =
         match convert cx tparams_map (loc, Ast.Type.Function f) with
         | (_, function_type), Ast.Type.Function f_ast -> function_type, f_ast
@@ -1087,7 +1088,7 @@ let rec convert cx tparams_map = Ast.Type.(function
     | { Object.Property.
         value = Object.Property.Get _ | Object.Property.Set _; _ } ->
       Flow.add_output cx
-        Flow_error.(EUnsupportedSyntax (loc, ObjectPropertyGetSet));
+        Error_message.(EUnsupportedSyntax (loc, ObjectPropertyGetSet));
       let _, prop_ast = Tast_utils.error_mapper#object_property_type (loc, prop) in
       props, proto, call_deprecated, prop_ast
   in
@@ -1119,7 +1120,7 @@ let rec convert cx tparams_map = Ast.Type.(function
       Some (cs, dict, pmap, proto, call_deprecated), indexer_ast
     | Some (_, Some _, _, _, _) as o ->
       Flow.add_output cx
-        FlowError.(EUnsupportedSyntax (loc, MultipleIndexers));
+        Error_message.(EUnsupportedSyntax (loc, MultipleIndexers));
       let _, i = Tast_utils.error_mapper#object_indexer_type (loc, indexer) in
       o, i
   in
@@ -1160,7 +1161,7 @@ let rec convert cx tparams_map = Ast.Type.(function
         add_call t o, ts, spread,
         InternalSlot (loc, { slot with Object.InternalSlot.value = value_ast })::rev_prop_asts
       else (
-        Flow.add_output cx FlowError.(
+        Flow.add_output cx Error_message.(
           EUnsupportedSyntax (loc, UnsupportedInternalSlot {
             name;
             static = false;
@@ -1371,15 +1372,15 @@ and mk_type_available_annotation cx tparams_map (loc, annot) =
 
 and mk_singleton_string loc key =
   let reason = mk_reason (RStringLit key) loc in
-  DefT (reason, bogus_trust (), SingletonStrT key)
+  DefT (reason, annot_trust (), SingletonStrT key)
 
 and mk_singleton_number loc num raw =
   let reason = mk_reason (RNumberLit raw) loc in
-  DefT (reason, bogus_trust (), SingletonNumT (num, raw))
+  DefT (reason, annot_trust (), SingletonNumT (num, raw))
 
 and mk_singleton_boolean loc b =
   let reason = mk_reason (RBooleanLit b) loc in
-  DefT (reason, bogus_trust (), SingletonBoolT b)
+  DefT (reason, annot_trust (), SingletonBoolT b)
 
 (* Given the type of expression C and type arguments T1...Tn, return the type of
    values described by C<T1,...,Tn>, or C when there are no type arguments. *)
@@ -1402,7 +1403,7 @@ and mk_type_param_declarations cx ?(tparams_map=SMap.empty) tparams =
     let reason = mk_reason (RType name) name_loc in
     let bound, bound_ast = match bound with
     | Ast.Type.Missing loc ->
-        let t = DefT (reason, bogus_trust (), MixedT Mixed_everything) in
+        let t = DefT (reason, annot_trust (), MixedT Mixed_everything) in
         t, Ast.Type.Missing (loc, t)
     | Ast.Type.Available (bound_loc, u) ->
         let bound, bound_ast = mk_type cx tparams_map reason (Some u) in
@@ -1459,7 +1460,7 @@ and type_identifier cx name loc =
   if Type_inference_hooks_js.dispatch_id_hook cx name loc
   then Unsoundness.at InferenceHooks loc
   else if name = "undefined"
-  then VoidT.at loc
+  then VoidT.at loc |> with_trust annot_trust
   else Env.var_ref ~lookup_mode:ForType cx name loc
 
 and mk_interface_super cx tparams_map (loc, {Ast.Type.Generic.id; targs}) =
@@ -1488,7 +1489,7 @@ and add_interface_properties cx tparams_map properties s =
     | Indexer (loc, { Indexer.static; _ }) as indexer_prop
       when mem_field ~static "$key" x ->
       Flow.add_output cx
-        Flow_error.(EUnsupportedSyntax (loc, MultipleIndexers));
+        Error_message.(EUnsupportedSyntax (loc, MultipleIndexers));
       x, (Tast_utils.error_mapper#object_type_property indexer_prop)::rev_prop_asts
     | Indexer (loc, indexer) ->
       let { Indexer.key; value; static; variance; _ } = indexer in
@@ -1501,14 +1502,14 @@ and add_interface_properties cx tparams_map properties s =
         key; value; static; proto; optional; _method; variance;
       } as prop)) ->
       if optional && _method
-      then Flow.add_output cx Flow_error.(EInternal (loc, OptionalMethod));
+      then Flow.add_output cx Error_message.(EInternal (loc, OptionalMethod));
       let polarity = polarity variance in
       let x, prop = Ast.Expression.Object.(
         match _method, key, value with
         | _, Property.Literal (loc, _), _
         | _, Property.PrivateName (loc, _), _
         | _, Property.Computed (loc, _), _ ->
-            Flow.add_output cx (Flow_error.EUnsupportedSyntax (loc, Flow_error.IllegalName));
+            Flow.add_output cx (Error_message.EUnsupportedSyntax (loc, Error_message.IllegalName));
             x, Tast_utils.error_mapper#object_property_type (loc, prop)
 
         (* Previously, call properties were stored in the props map under the key
@@ -1520,7 +1521,7 @@ and add_interface_properties cx tparams_map properties s =
            property is ignored. *)
         | _, (Property.Identifier (id_loc, { Ast.Identifier.name= "$call"; comments })),
             Ast.Type.Object.Property.Init value when not proto ->
-            Flow.add_output cx Flow_error.(EDeprecatedCallSyntax id_loc);
+            Flow.add_output cx Error_message.(EDeprecatedCallSyntax id_loc);
             let (_, t), _ as value_ast = convert cx tparams_map value in
             let t = if optional then Type.optional t else t in
             add_call_deprecated ~static t x,
@@ -1545,7 +1546,7 @@ and add_interface_properties cx tparams_map properties s =
 
         | true, Property.Identifier _, _ ->
             Flow.add_output cx
-              Flow_error.(EInternal (loc, MethodNotAFunction));
+              Error_message.(EInternal (loc, MethodNotAFunction));
             x, Tast_utils.error_mapper#object_property_type (loc, prop)
 
         | false, (Property.Identifier (id_loc, { Ast.Identifier.name; comments })),
@@ -1562,7 +1563,7 @@ and add_interface_properties cx tparams_map properties s =
         (* unsafe getter property *)
         | _, (Property.Identifier (id_loc, { Ast.Identifier.name; comments })),
             Ast.Type.Object.Property.Get (get_loc, func) ->
-            Flow_js.add_output cx (Flow_error.EUnsafeGettersSetters loc);
+            Flow_js.add_output cx (Error_message.EUnsafeGettersSetters loc);
             let fsig, func_ast = mk_func_sig cx tparams_map loc func in
             let prop_t = fsig.Func_sig.return_t in
             add_getter ~static name id_loc fsig x,
@@ -1574,7 +1575,7 @@ and add_interface_properties cx tparams_map properties s =
         (* unsafe setter property *)
         | _, (Property.Identifier (id_loc, { Ast.Identifier.name; comments })),
             Ast.Type.Object.Property.Set (set_loc, func) ->
-            Flow_js.add_output cx (Flow_error.EUnsafeGettersSetters loc);
+            Flow_js.add_output cx (Error_message.EUnsafeGettersSetters loc);
             let fsig, func_ast = mk_func_sig cx tparams_map loc func in
             let prop_t = match fsig with
             | { Func_sig.tparams=None; fparams; _ } ->
@@ -1605,7 +1606,7 @@ and add_interface_properties cx tparams_map properties s =
         append_call ~static t x,
         InternalSlot (loc, { slot with InternalSlot.value })::rev_prop_asts
       else (
-        Flow.add_output cx Flow_error.(
+        Flow.add_output cx Error_message.(
           EUnsupportedSyntax (loc, UnsupportedInternalSlot {
             name;
             static;
@@ -1614,7 +1615,7 @@ and add_interface_properties cx tparams_map properties s =
       )
 
     | SpreadProperty (loc, _)  as prop ->
-      Flow.add_output cx Flow_error.(EInternal (loc, InterfaceTypeSpread));
+      Flow.add_output cx Error_message.(EInternal (loc, InterfaceTypeSpread));
       x, (Tast_utils.error_mapper#object_type_property prop)::rev_prop_asts
   ) (s, []) properties
   in

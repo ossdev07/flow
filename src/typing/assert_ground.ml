@@ -113,7 +113,7 @@ module Kit (Flow: Flow_common.S): Flow_common.ASSERT_GROUND = struct
                else Core_list.map ~f:(fun reason ->
                    repos_reason (def_aloc_of_reason reason) reason)
                  (Nel.to_list !reason_stack) in
-            add_output cx (FlowError.EMissingAnnotation (r, trace_reasons));
+            add_output cx (Error_message.EMissingAnnotation (r, trace_reasons));
             seen
           | Positive ->
             match constraints with
@@ -218,12 +218,13 @@ module Kit (Flow: Flow_common.S): Flow_common.ASSERT_GROUND = struct
           seen
         | DefT (r, _, FunT (static, prototype, ft)) ->
             (* This won't propagate to any other types because this happens post-merge *)
-            let any = AnyT.locationless Untyped in
-            unify_opt cx ~unify_any:true static any;
-            unify_opt cx ~unify_any:true prototype any;
-            unify_opt cx ~unify_any:true ft.this_t any;
+            let any kind = AnyT.locationless (Unsound kind) in
+            any DummyStatic |> unify_opt cx ~unify_any:true static;
+            any FunctionPrototype |> unify_opt cx ~unify_any:true prototype;
+            any BoundFunctionThis |>unify_opt cx ~unify_any:true ft.this_t;
             super#type_ cx pole seen
-              (DefT (r, bogus_trust (), FunT (any, any, {ft with this_t = any})))
+              (DefT (r, bogus_trust (), FunT (any DummyStatic,
+                any FunctionPrototype, {ft with this_t = any BoundFunctionThis})))
         | _ -> super#type_ cx pole seen t
       in
       seen)
@@ -288,7 +289,7 @@ module Kit (Flow: Flow_common.S): Flow_common.ASSERT_GROUND = struct
           else loop ~constant_polarity_param:(s, Positive) cx pole seen ((Nel.to_list tparams), targs)
       | DefT (_, _, PolyT (_, tparams, _, _)) -> loop cx pole seen ((Nel.to_list tparams), targs)
       | DefT (_, _, EmptyT) -> seen
-      | DefT (_, _, AnyT _) -> seen
+      | AnyT _ -> seen
       | _ ->
           (* We don't error here on an unexpected typeapp because we would have already
            * caught that this type is not polymorphic earlier *)

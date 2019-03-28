@@ -357,8 +357,8 @@ end with type t = Impl.t) = struct
           node "ArrayExpression" loc [
             "elements", array_of_list (option expression_or_spread) elements;
           ]
-      | loc, Object { Object.properties } ->
-          node "ObjectExpression" loc [
+      | loc, Object { Object.properties; comments } ->
+          node ?comments "ObjectExpression" loc [
             "properties", array_of_list object_property properties;
           ]
       | loc, Function _function -> function_expression (loc, _function)
@@ -960,7 +960,7 @@ end with type t = Impl.t) = struct
         "each", bool each;
       ]
 
-    and literal (loc, { Literal.value; raw }) =
+    and literal (loc, { Literal.value; raw; comments }) =
       let value_ = match value with
       | Literal.String str -> string str
       | Literal.Boolean b -> bool b
@@ -978,7 +978,7 @@ end with type t = Impl.t) = struct
       | _ ->
           [ "value", value_; "raw", string raw; ]
       in
-      node "Literal" loc props
+      node ?comments "Literal" loc props
 
     and string_literal (loc, { StringLiteral.value; raw }) =
       node "Literal" loc [

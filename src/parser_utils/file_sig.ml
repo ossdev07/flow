@@ -502,7 +502,7 @@ module Make
       this#handle_call call_loc callee arguments None;
       super#call call_loc expr
 
-    method! literal loc (expr: Ast.Literal.t) =
+    method! literal loc (expr: L.t Ast.Literal.t) =
       let open Ast.Literal in
       this#handle_literal loc expr.value;
       super#literal loc expr
@@ -952,7 +952,7 @@ module Make
   let verified errors file_sig =
     let file_sig = map_unit_file_sig file_sig in
     { file_sig with
-      tolerable_errors = Signature_builder_deps.ErrorSet.fold (fun error acc ->
+      tolerable_errors = Signature_builder_deps.PrintableErrorSet.fold (fun error acc ->
         (SignatureVerificationError error):: acc
       ) errors file_sig.tolerable_errors
     }
@@ -1171,11 +1171,11 @@ module Make
             if loc == loc'
             then tolerable_error
             else SignatureVerificationError (ExpectedSort (sort, x, loc'))
-          | ExpectedAnnotation loc ->
+          | ExpectedAnnotation (loc, sort) ->
             let loc' = this#loc loc in
             if loc == loc'
             then tolerable_error
-            else SignatureVerificationError (ExpectedAnnotation loc')
+            else SignatureVerificationError (ExpectedAnnotation (loc', sort))
           | InvalidTypeParamUse loc ->
             let loc' = this#loc loc in
             if loc == loc'

@@ -208,6 +208,7 @@ let lazy_flags prev = CommandSpec.ArgSpec.(
       ])
       ~doc:("Which lazy mode to use: 'fs', 'watchman', 'ide' or 'none'. Use this flag to " ^
             "override the lazy mode set in the .flowconfig (which defaults to 'none' if not set)")
+      ~env:"FLOW_LAZY_MODE"
 )
 
 let input_file_flag verb prev = CommandSpec.ArgSpec.(
@@ -634,11 +635,11 @@ type connect_params = {
 
 let collect_connect_flags
     main
+    lazy_mode
     timeout
     retries
     retry_if_init
     no_auto_start
-    lazy_mode
     temp_dir
     shm_flags
     ignore_version
@@ -664,9 +665,10 @@ let collect_connect_flags
     quiet;
   }
 
-let connect_flags prev = CommandSpec.ArgSpec.(
-  prev
-  |> collect collect_connect_flags
+let collect_connect_flags_without_lazy main = collect_connect_flags main None
+
+let connect_flags_with_lazy_collector collector = CommandSpec.ArgSpec.(
+  collector
   |> flag "--timeout" (optional int)
       ~doc:"Maximum time to wait, in seconds"
   |> flag "--retries" (optional int)
@@ -675,12 +677,24 @@ let connect_flags prev = CommandSpec.ArgSpec.(
       ~doc:"retry if the server is initializing (default: true)"
   |> flag "--no-auto-start" no_arg
       ~doc:"If the server is not running, do not start it; just exit"
-  |> lazy_flags
   |> temp_dir_flag
   |> shm_flags
   |> from_flag
   |> ignore_version_flag
   |> quiet_flag
+)
+
+let connect_flags_no_lazy prev = CommandSpec.ArgSpec.(
+  prev
+  |> collect collect_connect_flags_without_lazy
+  |> connect_flags_with_lazy_collector
+)
+
+let connect_flags prev = CommandSpec.ArgSpec.(
+  prev
+  |> collect collect_connect_flags
+  |> lazy_flags
+  |> connect_flags_with_lazy_collector
 )
 
 (* For commands that take both --quiet and --json or --pretty, make the latter two imply --quiet *)
@@ -723,6 +737,7 @@ module Options_flags = struct
     strip_root: bool;
     temp_dir: string option;
     traces: int option;
+    trust_mode: Options.trust_mode option;
     types_first: bool;
     verbose: Verbose.t option;
     wait_for_recheck: bool option;
@@ -758,7 +773,7 @@ let options_flags =
     debug profile all wait_for_recheck weak traces no_flowlib munge_underscore_members max_workers
     include_warnings max_warnings flowconfig_flags verbose strip_root temp_dir quiet
     merge_timeout saved_state_fetcher saved_state_no_fallback no_saved_state types_first
-    include_suppressions =
+    include_suppressions trust_mode =
     (match merge_timeout with
     | Some timeout when timeout < 0 ->
       FlowExitStatus.(exit ~msg:"--merge-timeout must be non-negative" Commandline_usage_error)
@@ -785,6 +800,7 @@ let options_flags =
       saved_state_fetcher;
       saved_state_no_fallback;
       no_saved_state;
+      trust_mode;
       types_first;
       include_suppressions;
    }
@@ -836,6 +852,13 @@ let options_flags =
         ~doc:"[EXPERIMENTAL] types-first architecture"
     |> flag "--include-suppressed" no_arg
         ~doc:"Ignore any `suppress_comment` lines in .flowconfig"
+    |> flag "--trust-mode"
+      (optional (enum [
+        "check", Options.CheckTrust;
+        "silent", Options.SilentTrust;
+        "none", Options.NoTrust;
+      ]))
+      ~doc:""
 
 
 let flowconfig_name_flag prev =
@@ -1015,6 +1038,7 @@ let make_options ~flowconfig_name ~flowconfig ~lazy_mode ~root (options_flags: O
     opt_no_saved_state = options_flags.no_saved_state;
     opt_arch;
     opt_include_suppressions = options_flags.include_suppressions;
+    opt_trust_mode = Option.value options_flags.trust_mode ~default:(FlowConfig.trust_mode flowconfig);
   }
 
 let make_env flowconfig_name connect_flags root =
@@ -1269,9 +1293,9 @@ let failwith_bad_response ~request ~response =
 let get_check_or_status_exit_code errors warnings max_warnings =
   let open FlowExitStatus in
   let open Errors in
-  if ConcreteLocErrorSet.is_empty errors then begin
+  if ConcreteLocPrintableErrorSet.is_empty errors then begin
     match max_warnings with
-    | Some x when ConcreteLocErrorSet.cardinal warnings > x -> Type_error
+    | Some x when ConcreteLocPrintableErrorSet.cardinal warnings > x -> Type_error
     | None | Some _ -> No_error
   end else
     Type_error

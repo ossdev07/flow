@@ -206,12 +206,12 @@ and collect_of_type ?log_unresolved cx reason acc = function
      virtualization of calls to this function doesn't lead to perf
      degradation: this function is expected to be quite hot). *)
 
-  | DefT (_, _, OptionalT t) | DefT (_, _, MaybeT t) ->
+  | OptionalT (_, t) | MaybeT (_, t) ->
     collect_of_type ?log_unresolved cx reason acc t
-  | DefT (_, _, UnionT rep) ->
+  | UnionT (_, rep) ->
     let ts = UnionRep.members rep in
     collect_of_types ?log_unresolved cx reason acc ts
-  | DefT (_, _, IntersectionT rep) ->
+  | IntersectionT (_, rep) ->
     let ts = InterRep.members rep in
     collect_of_types ?log_unresolved cx reason acc ts
 
@@ -260,8 +260,8 @@ and collect_of_type ?log_unresolved cx reason acc = function
   | DefT (_, _, SingletonBoolT _)
   | DefT (_, _, SingletonNumT _)
   | DefT (_, _, SingletonStrT _)
-  | DefT (_, _, AnyT _)
   | DefT (_, _, CharSetT _)
+  | AnyT _
     -> acc
 
   | MergedT (_, uses) ->

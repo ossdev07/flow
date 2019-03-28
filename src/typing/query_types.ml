@@ -45,7 +45,7 @@ let concretize_loc_pairs pair_list =
 let sort_loc_pairs pair_list =
   List.sort (fun (a, _) (b, _) -> Loc.compare a b) pair_list
 
-let type_at_pos_type ~full_cx ~file ~file_sig ~expand_aliases ~type_table ~typed_ast loc =
+let type_at_pos_type ~full_cx ~file ~file_sig ~expand_aliases ~omit_targ_defaults ~type_table ~typed_ast loc =
   let options = {
     Ty_normalizer_env.
     fall_through_merged = false;
@@ -54,6 +54,7 @@ let type_at_pos_type ~full_cx ~file ~file_sig ~expand_aliases ~type_table ~typed
     flag_shadowed_type_params = false;
     preserve_inferred_literal_types = false;
     optimize_types = true;
+    omit_targ_defaults;
   } in
   match find_type_at_pos_annotation typed_ast loc with
   | None -> FailureNoMatch
@@ -74,6 +75,7 @@ let dump_types cx file_sig ~printer =
     flag_shadowed_type_params = false;
     preserve_inferred_literal_types = false;
     optimize_types = true;
+    omit_targ_defaults = false;
   } in
   let file = Context.file cx in
   let type_table = Context.type_table cx in
@@ -104,6 +106,19 @@ let covered_types cx ~should_check =
   in
   sort_loc_pairs result_pairs
 
+let component_coverage ~full_cx =
+  let open Coverage in
+  let coverage_computer = new visitor in
+  Core_list.map ~f:(fun cx ->
+    let type_table = Context.type_table cx in
+    Type_table.fold_coverage (fun _ { Type.TypeScheme.type_; _ } coverage ->
+      match coverage_computer#type_ full_cx type_ with
+      | Kind.Any -> { coverage with any = coverage.any + 1 }
+      | Kind.Checked -> { coverage with covered = coverage.covered + 1 }
+      | Kind.Empty -> { coverage with empty = coverage.empty + 1 }
+    ) type_table initial_coverage
+  )
+
 (* 'suggest' can use as many types in the type tables as possible, which is why
    we are querying the tables from both "coverage" and "type_info". Coverage
    should be enough on its own, but "type_info" stores method types more
@@ -119,6 +134,7 @@ let suggest_types cx file_sig =
     flag_shadowed_type_params = true;
     preserve_inferred_literal_types = false;
     optimize_types = true;
+    omit_targ_defaults = false;
   } in
   let type_table = Context.type_table cx in
   let file = Context.file cx in

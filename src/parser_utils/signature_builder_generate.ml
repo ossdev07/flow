@@ -629,6 +629,7 @@ module T = struct
         arguments = [Ast.Expression.Expression (loc, Ast.Expression.Literal {
           Ast.Literal.value = Ast.Literal.String x;
           raw = x;
+          comments = Flow_ast_utils.mk_comments_opt ()
         })];
       } in
       let declaration = {
@@ -771,7 +772,7 @@ module Eval(Env: Signature_builder_verify.EvalEnv) = struct
   and literal_expr =
     let open Ast.Expression in
     function
-      | loc, Literal { Ast.Literal.value; raw } ->
+      | loc, Literal { Ast.Literal.value; raw; comments= _ } ->
         begin match value with
           | Ast.Literal.String value -> loc, T.StringLiteral { Ast.StringLiteral.value; raw }
           | Ast.Literal.Number value -> loc, T.NumberLiteral { Ast.NumberLiteral.value; raw }
@@ -804,7 +805,7 @@ module Eval(Env: Signature_builder_verify.EvalEnv) = struct
         loc, T.Function (function_ false tparams params return body)
       | loc, Object stuff ->
         let open Ast.Expression.Object in
-        let { properties } = stuff in
+        let { properties; comments= _ } = stuff in
         begin match object_ properties with
           | Some o -> loc, T.ObjectLiteral { frozen = false; properties = o }
           | None -> T.FixMe.mk_expr_type loc
@@ -827,7 +828,7 @@ module Eval(Env: Signature_builder_verify.EvalEnv) = struct
           | None -> T.FixMe.mk_expr_type loc
         end
       | loc, Import (source_loc,
-         (Literal { Ast.Literal.value = Ast.Literal.String value; raw } |
+         (Literal { Ast.Literal.value = Ast.Literal.String value; raw; comments= _ } |
           TemplateLiteral {
             TemplateLiteral.quasis = [_, {
               TemplateLiteral.Element.value = { TemplateLiteral.Element.cooked = value; raw }; _
@@ -846,7 +847,7 @@ module Eval(Env: Signature_builder_verify.EvalEnv) = struct
           arguments = [Expression (loc, Object stuff)]
         } ->
         let open Ast.Expression.Object in
-        let { properties } = stuff in
+        let { properties; comments= _ } = stuff in
         begin match object_ properties with
           | Some o -> loc, T.ObjectLiteral { frozen = true; properties = o }
           | None -> T.FixMe.mk_expr_type loc
@@ -1138,7 +1139,7 @@ module Generator(Env: Signature_builder_verify.EvalEnv) = struct
 
   let eval (loc, kind) =
     match kind with
-      | Kind.VariableDef { annot; init } ->
+      | Kind.VariableDef { id = _; annot; init } ->
         T.VariableDecl (Eval.annotation loc ?init annot)
       | Kind.FunctionDef { generator; tparams; params; return; body; } ->
         T.FunctionDecl (T.EXPR

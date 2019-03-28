@@ -19,17 +19,17 @@ end
 module Literals = struct
   open Ast.Literal
 
-  let string value =
-    { value = String value; raw = Printf.sprintf "%S" value; }
+  let string ?(comments=None) value =
+    { value = String value; raw = Printf.sprintf "%S" value; comments }
 
-  let number value raw =
-    { value = Number value; raw; }
+  let number ?(comments=None) value raw =
+    { value = Number value; raw; comments }
 
   let int value =
     number (float_of_int value) (Printf.sprintf "%d" value)
 
-  let bool is_true =
-    { value = Boolean is_true; raw = if is_true then "true" else "false" }
+  let bool ?(comments=None) is_true =
+    { value = Boolean is_true; raw = if is_true then "true" else "false"; comments }
 end
 
 module Patterns = struct
@@ -349,8 +349,8 @@ module Expressions = struct
   let object_property_with_literal ?(shorthand=false) ?(loc=Loc.none) k v =
     object_property ~shorthand ~loc (object_property_key_literal ~loc k) v
 
-  let object_ ?(loc=Loc.none) properties =
-    loc, Object { Object.properties }
+  let object_ ?comments ?(loc=Loc.none) properties =
+    loc, Object { Object.properties; comments }
 
   (* _object.property *)
   let member ~property _object =

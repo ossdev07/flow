@@ -435,9 +435,9 @@ module Config = struct
 
     let expr_of_value (v : value) : (Loc.t, Loc.t) E.t' = let open Ast.Literal in
       match v with
-      | Int i -> E.Literal {value = Number (float_of_int i); raw = string_of_int i}
-      | Str s -> E.Literal {value = String s; raw = "\"" ^ s ^ "\""}
-      | Bool b -> E.Literal {value = Boolean b; raw = string_of_bool b}
+      | Int i -> E.Literal {value = Number (float_of_int i); raw = string_of_int i; comments = Flow_ast_utils.mk_comments_opt ()}
+      | Str s -> E.Literal {value = String s; raw = "\"" ^ s ^ "\""; comments = Flow_ast_utils.mk_comments_opt ()}
+      | Bool b -> E.Literal {value = Boolean b; raw = string_of_bool b; comments = Flow_ast_utils.mk_comments_opt ()}
       | Obj o -> E.Object (ast_of_config o) in
 
     (* Convert all properties into object properties *)
@@ -450,7 +450,7 @@ module Config = struct
           Property (Loc.none, Init {key;
                                value;
                                shorthand = false})) c in
-    {properties = prop_list};;
+    {properties = prop_list; comments = Flow_ast_utils.mk_comments_opt ()};;
 
   (* Convert a config into string for printing *)
   let string_of_config (c : t) : string =
@@ -460,7 +460,7 @@ module Config = struct
   (* Return an empty config *)
   let empty () : t =
     let open E.Object in
-    to_config {properties = []};;
+    to_config {properties = []; comments = Flow_ast_utils.mk_comments_opt ()};;
 
   (* Get a value from the config given a string.*)
   let get (conf : t) (prop_name : string) : value =
@@ -551,6 +551,7 @@ let stub_metadata ~root ~checked = { Context.
   suppress_comments = [];
   suppress_types = SSet.empty;
   default_lib_dir = None;
+  trust_mode = Options.NoTrust;
 }
 
 (* Invoke flow for type checking *)
@@ -611,7 +612,7 @@ let flow_check (code : string) : string option =
       let file_sigs = Utils_js.FilenameMap.singleton filename (File_sig.abstractify_locs file_sig) in
       let reqs = Merge_js.Reqs.empty in
       (* WARNING: This line might crash. That's why we put the entire block into a try catch *)
-      let (final_cx, _), _other_cxs = Merge_js.merge_component_strict
+      let ((final_cx, _, _), _other_cxs) = Merge_js.merge_component_strict
           ~metadata:builtin_metadata ~lint_severities ~file_options:None ~strict_mode ~file_sigs
           ~get_ast_unsafe:(fun _ -> (comments, aloc_ast))
           ~get_docblock_unsafe:(fun _ -> stub_docblock)
@@ -623,14 +624,13 @@ let flow_check (code : string) : string option =
       let errors, warnings, suppressions =
         Error_suppressions.filter_lints ~include_suppressions suppressions errors severity_cover in
 
-      let errors = Errors.concretize_errorset errors in
-      let warnings = Errors.concretize_errorset warnings in
+      let errors = Flow_error.make_errors_printable errors in
+      let warnings = Flow_error.make_errors_printable warnings in
       let errors, _, suppressions = Error_suppressions.filter_suppressed_errors
-          suppressions errors ~unused:suppressions in
+          ~root ~file_options:None suppressions errors ~unused:suppressions in
       let warnings, _, _ = Error_suppressions.filter_suppressed_errors
-        suppressions warnings ~unused:suppressions
-      in
-      let error_num = Errors.ConcreteLocErrorSet.cardinal errors in
+          ~root ~file_options:None suppressions warnings ~unused:suppressions in
+      let error_num = Errors.ConcreteLocPrintableErrorSet.cardinal errors in
       if error_num = 0 then
         None
       else begin

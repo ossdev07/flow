@@ -88,26 +88,26 @@ let module_name_candidates ~options =
     List.rev (name::(List.fold_left map_name [] mappers))
   )
 
-let add_package filename ast =
-  match Package_json.parse ast with
+let add_package filename = function
   | Ok package ->
     Module_heaps.Package_heap_mutator.add_package_json filename package
-  | Error parse_err ->
-    assert_false (spf "%s: %s" filename parse_err)
+  | Error _ ->
+    Module_heaps.Package_heap_mutator.add_error filename
 
 let package_incompatible ~reader filename ast =
-  match Package_json.parse ast with
-  | Ok new_package ->
-    begin match Module_heaps.Reader.get_package ~reader filename with
-    | None -> true
-    | Some old_package -> old_package <> new_package
-    end
-  | Error parse_err ->
-    assert_false (spf "%s: %s" filename parse_err)
+  let new_package = Package_json.parse ast in
+  let old_package = Module_heaps.Reader.get_package ~reader filename in
+  match old_package, new_package with
+  | None, Ok _ -> true (* didn't exist before, found a new one *)
+  | None, Error _ -> false (* didn't exist before, new one is invalid *)
+  | Some (Error ()), Error _ -> false (* was invalid before, still invalid *)
+  | Some (Error ()), Ok _ -> true (* was invalid before, new one is valid *)
+  | Some (Ok _), Error _ -> true (* existed before, new one is invalid *)
+  | Some (Ok old_package), Ok new_package -> old_package <> new_package
 
 type resolution_acc = {
   mutable paths: SSet.t;
-  mutable errors: Flow_error.error_message list;
+  mutable errors: Error_message.t list;
 }
 
 (* Specification of a module system. Currently this signature is sufficient to
@@ -340,7 +340,10 @@ module Node = struct
     then None
     else
       let package = match Module_heaps.Reader_dispatcher.get_package ~reader package_filename with
-      | Some package -> package
+      | Some (Ok package) -> package
+      | Some (Error ()) ->
+        (* invalid, but we already raised an error when building PackageHeap *)
+        Package_json.empty
       | None ->
         let msg =
           let is_included = Files.is_included file_options package_filename in
@@ -354,9 +357,9 @@ module Node = struct
               (Files.relative_path project_root_str package_filename)
           in
           if is_included || is_contained_in_root then (
-            Flow_error.(EInternal (loc, PackageHeapNotFound package_relative_to_root))
+            Error_message.(EInternal (loc, PackageHeapNotFound package_relative_to_root))
           ) else (
-            Flow_error.EModuleOutsideRoot (loc, package_relative_to_root)
+            Error_message.EModuleOutsideRoot (loc, package_relative_to_root)
           )
         in
         begin match resolution_acc with
@@ -702,8 +705,9 @@ let add_parsed_resolved_requires ~mutator ~reader ~options ~node_modules_contain
   in
   Module_heaps.Resolved_requires_mutator.add_resolved_requires mutator file resolved_requires;
   List.fold_left (fun acc msg ->
-    Errors.ErrorSet.add (Flow_error.error_of_msg
-      ~trace_reasons:[] ~source_file:file msg) acc) Errors.ErrorSet.empty errors
+    Flow_error.ErrorSet.add (
+      Flow_error.error_of_msg ~trace_reasons:[] ~source_file:file msg
+    ) acc) Flow_error.ErrorSet.empty errors
 
 (* Repick providers for modules that are exported by new and changed files, or
    were provided by changed and deleted files.

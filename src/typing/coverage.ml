@@ -141,11 +141,11 @@ class visitor = object (self)
       ->
       self#type_ cx t
 
-    | DefT (_, _, UnionT rep) ->
+    | UnionT (_, rep) ->
       let t0, (t1, ts) = UnionRep.members_nel rep in
       self#types_nel cx OpOr (t0, t1::ts)
 
-    | DefT (_, _, IntersectionT rep) ->
+    | IntersectionT (_, rep) ->
       let t0, (t1, ts) = InterRep.members_nel rep in
       self#types_nel cx OpAnd (t0, t1::ts)
 
@@ -161,10 +161,12 @@ class visitor = object (self)
     | FunProtoCallT _
     | InternalT _
     | KeysT _
+    | MaybeT _
     | ModuleT _
     | NullProtoT _
     | OpaqueT _
     | ObjProtoT _
+    | OptionalT _
 
     | DefT (_, _, ArrT _)
     | DefT (_, _, BoolT _)
@@ -173,12 +175,10 @@ class visitor = object (self)
     | DefT (_, _, FunT _)
     | DefT (_, _, InstanceT _)
     | DefT (_, _, IdxWrapper _)
-    | DefT (_, _, MaybeT _)
     | DefT (_, _, MixedT _)
     | DefT (_, _, NumT _)
     | DefT (_, _, NullT)
     | DefT (_, _, ObjT _)
-    | DefT (_, _, OptionalT _)
     | DefT (_, _, ReactAbstractComponentT _)
     | DefT (_, _, SingletonNumT _)
     | DefT (_, _, SingletonStrT _)
@@ -193,7 +193,7 @@ class visitor = object (self)
     | TypeDestructorTriggerT _
 
     | DefT (_, _, EmptyT) -> Kind.Empty
-    | DefT (_, _, AnyT _) -> Kind.Any
+    | AnyT _ -> Kind.Any
 
   method private types_of_use acc = function
     | UseT (_, t) -> t::acc
@@ -238,3 +238,15 @@ class visitor = object (self)
     | Kind.Empty -> self#types_ cx op init ts
 
 end
+
+type file_coverage = {
+  covered: int;
+  any: int;
+  empty: int;
+}
+
+let initial_coverage = {
+  covered = 0;
+  any = 0;
+  empty = 0;
+}

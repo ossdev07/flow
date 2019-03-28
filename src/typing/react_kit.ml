@@ -14,11 +14,11 @@ let err_incompatible
   trace
   ~use_op
   ~reason_op
-  ~(add_output: Context.t -> ?trace:Trace.t -> Flow_error.error_message -> unit)
+  ~(add_output: Context.t -> ?trace:Trace.t -> Error_message.t -> unit)
   reason
   u
 =
-  add_output cx ~trace (Flow_error.EReactKit
+  add_output cx ~trace (Error_message.EReactKit
     ((reason_op, reason), u, use_op))
 let component_class
   cx
@@ -124,7 +124,7 @@ let props_to_tout
   ~(rec_flow_t: Context.t -> Trace.t -> ?use_op:Type.use_op -> (Type.t * Type.t) -> unit)
   ~rec_flow
   ~(get_builtin_type: Context.t -> ?trace:Trace.t -> reason -> ?use_desc:bool -> string -> Type.t)
-  ~(add_output: Context.t -> ?trace:Trace.t -> Flow_error.error_message -> unit)
+  ~(add_output: Context.t -> ?trace:Trace.t -> Error_message.t -> unit)
   u
   tout
 =
@@ -150,11 +150,11 @@ let props_to_tout
     (Field (None, tout, Positive))
 
   (* any and any specializations *)
-  | DefT (reason, _, AnyT src) ->
+  | AnyT (reason, src) ->
     rec_flow_t cx trace (AnyT.why src reason, tout)
 
-  | DefT (reason, _, ReactAbstractComponentT _) ->
-    rec_flow_t cx trace (MixedT.why reason, tout)
+  | DefT (reason, trust, ReactAbstractComponentT _) ->
+    rec_flow_t cx trace (MixedT.why reason trust, tout)
 
   (* ...otherwise, error. *)
   | _ -> err_incompatible cx trace ~use_op ~reason_op ~add_output (reason_of_t component) u
@@ -188,7 +188,7 @@ let get_config
   ~rec_flow
   ~(rec_unify: Context.t -> Trace.t -> use_op:Type.use_op -> ?unify_any:bool -> Type.t -> Type.t -> unit)
   ~get_builtin_type
-  ~(add_output: Context.t -> ?trace:Trace.t -> Flow_error.error_message -> unit)
+  ~(add_output: Context.t -> ?trace:Trace.t -> Error_message.t -> unit)
   u
   pole
   tout
@@ -249,7 +249,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
     let coerce_object = function
       | DefT (reason, _, ObjT { props_tmap; dict_t; flags; _ }) ->
         Ok (reason, Context.find_props cx props_tmap, dict_t, flags)
-      | DefT (reason, _, AnyT _) ->
+      | AnyT (reason, _) ->
         Error reason
       | _ ->
         let reason = reason_of_t l in
@@ -265,7 +265,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
         rec_flow_t cx trace (t,
           get_builtin_type cx reason_op "ReactPropsCheckType");
         Error reason
-      | DefT (reason, _, AnyT _) ->
+      | AnyT (reason, _) ->
         Error reason
       | t ->
         let reason = reason_of_t t in
@@ -276,7 +276,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
     let coerce_array = function
       | DefT (_, _, ArrT (ArrayAT (_, Some ts) | TupleAT (_, ts))) ->
         Ok ts
-      | DefT (reason, _, ArrT _) | DefT (reason, _, AnyT _) ->
+      | DefT (reason, _, ArrT _) | AnyT (reason, _) ->
         Error reason
       | t ->
         let reason = reason_of_t t in
@@ -331,13 +331,13 @@ module Kit (Flow: Flow_common.S): REACT = struct
         rec_flow cx trace (component, ReactInToProps (reason_op, tin))
 
       (* Abstract components. *)
-      | DefT (reason, _trust, ReactAbstractComponentT _) ->
-        rec_flow_t cx trace (tin, MixedT.why reason);
+      | DefT (reason, trust, ReactAbstractComponentT _) ->
+        rec_flow_t cx trace (tin, MixedT.why reason trust);
 
       (* Intrinsic components. *)
       | DefT (_, _, StrT lit) -> get_intrinsic `Props lit (Field (None, tin, Negative))
 
-      | DefT (reason, _trust, AnyT source) ->
+      | AnyT (reason, source) ->
         rec_flow_t cx trace (tin, AnyT.why source reason)
 
       (* ...otherwise, error. *)
@@ -376,12 +376,12 @@ module Kit (Flow: Flow_common.S): REACT = struct
           (fun desc -> RReactChildrenOrUndefinedOrType desc)
           (reason_of_t spread)
         in
-        Some (DefT (r, bogus_trust (), OptionalT (
+        Some (OptionalT (r,
           union_of_ts r [
             spread;
             (DefT (r, bogus_trust (), ArrT (ArrayAT (spread, None))));
           ]
-        )))
+        ))
       (* If we have one children argument and a spread of unknown length then
        * React may either pass in the unwrapped argument, or an array where the
        * element type is the union of the known argument and the spread type. *)
@@ -558,12 +558,12 @@ module Kit (Flow: Flow_common.S): REACT = struct
       | DefT (_, _, ClassT component) -> rec_flow_t cx trace (component, tout)
 
       (* Stateless functional components. *)
-      | DefT (r, _, FunT _) ->
-        rec_flow_t cx trace (VoidT.make (replace_reason_const RVoid r), tout)
+      | DefT (r, trust, FunT _) ->
+        rec_flow_t cx trace (VoidT.make (replace_reason_const RVoid r) trust, tout)
 
       (* Stateless functional components, again. This time for callable `ObjT`s. *)
-      | DefT (r, _, ObjT { call_t = Some _; _ }) ->
-        rec_flow_t cx trace (VoidT.make (replace_reason_const RVoid r), tout)
+      | DefT (r, trust, ObjT { call_t = Some _; _ }) ->
+        rec_flow_t cx trace (VoidT.make (replace_reason_const RVoid r) trust, tout)
 
       (* Abstract components. *)
       | DefT (_, _, ReactAbstractComponentT {instance; _}) ->
@@ -572,7 +572,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
       (* Intrinsic components. *)
       | DefT (_, _, StrT lit) -> get_intrinsic `Instance lit (Field (None, tout, Positive))
 
-      | DefT (reason, _, AnyT source) ->
+      | AnyT (reason, source) ->
         rec_flow_t cx trace (AnyT.why source reason, tout)
 
       (* ...otherwise, error. *)
@@ -595,7 +595,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
         | [t] -> t
         | t0::t1::ts ->
           let reason = replace_reason_const RUnionType reason in
-          DefT (reason, bogus_trust (), UnionT (UnionRep.make t0 t1 ts))
+          UnionT (reason, UnionRep.make t0 t1 ts)
       in
 
       let open SimplifyPropType in
@@ -623,7 +623,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
         let props = SMap.empty in
         let dict = {
           dict_name = None;
-          key = tout |> reason_of_t |> StrT.why;
+          key = tout |> reason_of_t |> StrT.why |> with_trust bogus_trust;
           value;
           dict_polarity = Neutral;
         } in
@@ -861,7 +861,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
           let t = match acc with
           | None ->
             let reason = replace_reason_const RReactDefaultProps reason_op in
-            Obj_type.mk cx reason
+            VoidT.make reason (bogus_trust ())
           | Some (Unknown reason) -> AnyT.make Untyped reason
           | Some (Known (reason, props, dict, _)) ->
             Obj_type.mk_with_proto cx reason ~props (ObjProtoT reason)
@@ -983,7 +983,7 @@ module Kit (Flow: Flow_common.S): REACT = struct
             | None -> v
             | Some t ->
               (* Tie the `this` knot with BindT *)
-              let dummy_return = MixedT.make reason_op in
+              let dummy_return = MixedT.make reason_op |> with_trust bogus_trust in
               let calltype = mk_methodcalltype knot.this None [] dummy_return in
               rec_flow cx trace (t, BindT (unknown_use, reason_op, calltype, true));
               (* Because we are creating an instance type, which can be used as an
@@ -1024,8 +1024,8 @@ module Kit (Flow: Flow_common.S): REACT = struct
           | Some (Unknown reason) ->
             let dict = Some {
               dict_name = None;
-              key = StrT.why reason;
-              value = EmptyT.why reason;
+              key = StrT.why reason (bogus_trust ());
+              value = EmptyT.why reason (bogus_trust ());
               dict_polarity = Neutral;
             } in
             reason, static_props, dict, false, true

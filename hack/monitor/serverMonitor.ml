@@ -351,7 +351,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
       (** TODO: Send this to client so it is visible. *)
       Hh_logger.log "Got %s request for typechecker. Prior request %.1f seconds ago"
         handoff_options.MonitorRpc.pipe_name since_last_request;
-      msg_to_channel client_fd PH.Sentinel;
+      msg_to_channel client_fd (PH.Sentinel server.finale_file);
       hand_off_client_connection_with_retries server_fd 8 client_fd;
       HackEventLogger.client_connection_sent ();
       server.last_request_handoff := Unix.time ();
@@ -593,7 +593,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
         let stack = Printexc.get_backtrace () in
         ignore (Hh_logger.log
           "check_and_run_loop_ threw with Unix.ECHILD. Exiting. - %s" stack);
-        Exit_status.exit Exit_status.No_server_running
+        Exit_status.exit Exit_status.No_server_running_should_retry
       | Exit_status.Exit_with _ as e -> raise e
       | e ->
         let stack = Printexc.get_backtrace () in

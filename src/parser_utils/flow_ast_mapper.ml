@@ -610,7 +610,11 @@ class ['loc] mapper = object(this)
     let open Flow_ast.Type.Generic.Identifier in
     match git with
     | Unqualified i -> id this#identifier i git (fun i -> Unqualified i)
-    | _ -> git (* TODO *)
+    | Qualified (loc, {qualification; id}) ->
+      let qualification' = this#generic_identifier_type qualification in
+      let id' = this#identifier id in
+      if qualification' == qualification && id' == id then git
+      else Qualified (loc, {qualification = qualification'; id = id'})
 
   method variance (variance: ('loc) Flow_ast.Variance.t option) = variance
 
@@ -652,6 +656,8 @@ class ['loc] mapper = object(this)
     if id' == id && targs' == targs then gt
     else { id = id'; targs = targs' }
 
+  method string_literal_type _loc (lit: Flow_ast.StringLiteral.t) = lit
+
   method type_ (t: ('loc, 'loc) Flow_ast.Type.t) =
     let open Flow_ast.Type in
     match t with
@@ -663,7 +669,6 @@ class ['loc] mapper = object(this)
     | _, Number
     | _, String
     | _, Boolean
-    | _, StringLiteral _
     | _, NumberLiteral _
     | _, BooleanLiteral _
     | _, Exists
@@ -675,6 +680,8 @@ class ['loc] mapper = object(this)
     | loc, Object ot -> id_loc this#object_type loc ot t (fun ot -> loc, Object ot)
     | loc, Interface i -> id_loc this#interface_type loc i t (fun i -> loc, Interface i)
     | loc, Generic gt -> id_loc this#generic_type loc gt t (fun gt -> loc, Generic gt)
+    | loc, StringLiteral lit ->
+      id_loc this#string_literal_type loc lit t (fun lit -> loc, StringLiteral lit)
     | loc, Union (t0, t1, ts) ->
       let t0' = this#type_ t0 in
       let t1' = this#type_ t1 in
@@ -989,7 +996,7 @@ class ['loc] mapper = object(this)
     if label == label' && body == body' then stmt
     else { label = label'; body = body' }
 
-  method literal _loc (expr: Flow_ast.Literal.t) = expr
+  method literal _loc (expr: 'loc Flow_ast.Literal.t) = expr
 
   method logical _loc (expr: ('loc, 'loc) Flow_ast.Expression.Logical.t) =
     let open Flow_ast.Expression.Logical in
@@ -1049,7 +1056,7 @@ class ['loc] mapper = object(this)
 
   method object_ _loc (expr: ('loc, 'loc) Flow_ast.Expression.Object.t) =
     let open Flow_ast.Expression.Object in
-    let { properties } = expr in
+    let { properties; comments } = expr in
     let properties' = ListUtils.ident_map (fun prop ->
       match prop with
       | Property p ->
@@ -1059,8 +1066,9 @@ class ['loc] mapper = object(this)
         let s' = this#spread_property s in
         if s == s' then prop else SpreadProperty s'
     ) properties in
-    if properties == properties' then expr
-    else { properties = properties' }
+    let comments' = this#syntax_opt comments in
+    if properties == properties' && comments == comments' then expr
+    else { properties = properties'; comments = comments' }
 
   method object_property (prop: ('loc, 'loc) Flow_ast.Expression.Object.Property.t) =
     let open Flow_ast.Expression.Object.Property in
@@ -1177,7 +1185,7 @@ class ['loc] mapper = object(this)
     ignore kind;
     this#identifier ident
 
-  method pattern_literal ?kind loc (expr: Flow_ast.Literal.t) =
+  method pattern_literal ?kind loc (expr: 'loc Flow_ast.Literal.t) =
     ignore kind;
     this#literal loc expr
 
@@ -1208,7 +1216,7 @@ class ['loc] mapper = object(this)
     | Computed expr ->
       id (this#pattern_object_property_computed_key ?kind) expr key (fun expr' -> Computed expr')
 
-  method pattern_object_property_literal_key ?kind loc (key: Flow_ast.Literal.t) =
+  method pattern_object_property_literal_key ?kind loc (key: 'loc Flow_ast.Literal.t) =
     this#pattern_literal ?kind loc key
 
   method pattern_object_property_identifier_key ?kind (key: 'loc Flow_ast.Identifier.t) =
